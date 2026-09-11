@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jmcomic-calibre"
-version = "0.1.0"
+dynamic = ["version"]
 description = "JMComic → Calibre 一键入库：下载、转 PDF/CBZ、写元数据、导入书库"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,6 +34,9 @@ jmcal = "jmcomic_calibre.cli:main"
 [project.urls]
 Homepage = "https://github.com/yifenliwu/jmcomic-calibre"
 Issues = "https://github.com/yifenliwu/jmcomic-calibre/issues"
+
+[tool.hatch.version]
+path = "src/jmcomic_calibre/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jmcomic_calibre"]
