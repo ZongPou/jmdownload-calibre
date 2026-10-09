@@ -40,6 +40,7 @@ class DownloadDialog(QDialog):
     def __init__(self, parent, plugin):
         QDialog.__init__(self, parent)
         self.plugin = plugin
+        self.gui = plugin.gui  # calibre 主窗口引用（书库刷新用）
         self._probe = None
         self._worker = None
         self._python_cmd = None  # doctor 探测到的解释器命令
