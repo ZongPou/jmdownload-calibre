@@ -2,6 +2,7 @@
 
 下载走 worker.DownloadWorker（子进程桥调用系统 Python 的 jmcomic），
 本类只负责 UI 状态机与事件展示。
+进度条双模式：拿到总页数（meta.total_images）后为百分比模式，否则 busy。
 """
 
 from qt.core import (
@@ -45,6 +46,7 @@ class DownloadDialog(QDialog):
         self._worker = None
         self._python_cmd = None  # doctor 探测到的解释器命令
         self._album_start_text = ""
+        self._total_images = 0  # 当前本的预期图片总数（meta 事件带来）
 
         self.setWindowTitle("JMComic 下载")
         self.setMinimumWidth(520)
@@ -143,6 +145,7 @@ class DownloadDialog(QDialog):
         self._worker.finished.connect(self.on_worker_finished)
         self.set_downloading_ui(True)
         self.status_label.setText("正在启动下载引擎…")
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
         self._worker.start()
 
@@ -155,7 +158,9 @@ class DownloadDialog(QDialog):
         kind = ev.get("event")
         if kind == "album_start":
             self._album_start_text = "正在下载 %s…" % ev.get("album_id")
+            self._total_images = 0
             self.status_label.setText(self._album_start_text)
+            self.progress_bar.setRange(0, 0)  # 元数据未到，先 busy
         elif kind == "meta":
             title = ev.get("title", "")
             authors = "、".join(ev.get("authors") or [])
@@ -164,15 +169,35 @@ class DownloadDialog(QDialog):
                 head += "（%s）" % authors
             self._album_start_text = "正在下载 %s …" % head
             self.status_label.setText(self._album_start_text)
+            self._total_images = int(ev.get("total_images") or 0)
+            if self._total_images > 0:
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(0)
+            else:
+                self.progress_bar.setRange(0, 0)
         elif kind == "progress":
-            n = ev.get("images", 0)
-            self.status_label.setText("%s 已下载 %s 张图片" % (self._album_start_text, n))
+            n = int(ev.get("images") or 0)
+            total = int(ev.get("total") or self._total_images or 0)
+            percent = ev.get("percent")
+            if total > 0:
+                self.status_label.setText(
+                    "%s 已下载 %d/%d 张（%s%%）"
+                    % (self._album_start_text, n, total, percent)
+                )
+                if percent is not None:
+                    self.progress_bar.setValue(int(percent))
+            else:
+                self.status_label.setText(
+                    "%s 已下载 %d 张图片" % (self._album_start_text, n)
+                )
         elif kind == "log":
             pass  # 噪音输出，忽略
         elif kind == "downloaded":
             self.status_label.setText(
                 "%s 下载完成：%s 张图片" % (self._album_start_text, ev.get("images", "?"))
             )
+            if self._total_images > 0:
+                self.progress_bar.setValue(100)
         elif kind == "album_ok":
             pass  # 汇总在 all_done
         elif kind == "ingesting":
@@ -212,7 +237,7 @@ class DownloadDialog(QDialog):
             parts.append("失败 %d 本：%s" % (len(failed), detail))
         self.status_label.setText("；".join(parts) or "无任务")
         if ok:
-            # add_books 直写数据库，GUI 视图需要手动触发刷新；
+            # legacy add_books 会同步 GUI 数据缓存，但视图仍需手动触发重载；
             # 各步骤独立容错，避免单点异常中断整条刷新链
             gui = self.gui
 

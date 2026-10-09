@@ -2,11 +2,14 @@
 
 由插件运行时从 zip 提取本文件，再用用户配置的解释器启动：
     python bridge.py --album-id 350234 --out-dir <目录> [--proxy http://...]
+    python bridge.py --album-id 350234 --out-dir <目录> --meta-only   # 仅诊断
 
 协议（stdout 逐行 JSON，接收方忽略无法解析的行）：
     {"event": "meta", "album_id": "...", "title": "...", "authors": [...],
-     "tags": [...], "description": "...", "published": "..."}
-    {"event": "progress", "images": <已下载图片数>, "percent": <float|null>}
+     "tags": [...], "description": "...", "published": "...",
+     "total_images": <总页数>}
+    {"event": "progress", "images": <已下载图片数>, "total": <总页数>,
+     "percent": <float|null>}
     {"event": "log", "message": "..."}
     {"event": "downloaded", "dir": "...", "images": <n>}
     {"event": "error", "message": "...", "traceback": "..."}
@@ -91,6 +94,7 @@ def fetch_meta_and_download(
 
     client = option.new_jm_client()
     album = client.get_album_detail(str(album_id))
+    total_images = int(getattr(album, "page_count", 0) or 0)
     emit(
         {
             "event": "meta",
@@ -100,8 +104,14 @@ def fetch_meta_and_download(
             "tags": [str(t) for t in (getattr(album, "tags", None) or [])],
             "description": str(getattr(album, "description", "") or ""),
             "published": str(getattr(album, "pub_date", "") or ""),
+            "total_images": total_images,
         }
     )
+
+    if meta_only:
+        emit({"event": "log", "message": "--meta-only 跳过下载"})
+        emit({"event": "downloaded", "dir": out_dir, "images": 0})
+        return
 
     # 进度轮询线程：统计已落地的图片文件数（不依赖 jmcomic 内部回调 API）
     stop = threading.Event()
@@ -109,12 +119,15 @@ def fetch_meta_and_download(
     def progress_loop():
         while not stop.wait(PROGRESS_INTERVAL):
             n = count_images(out_dir)
-            emit({"event": "progress", "images": n, "percent": None})
-
-    if meta_only:
-        emit({"event": "log", "message": "--meta-only 跳过下载"})
-        emit({"event": "downloaded", "dir": out_dir, "images": 0})
-        return
+            percent = round(100.0 * n / total_images, 1) if total_images else None
+            emit(
+                {
+                    "event": "progress",
+                    "images": n,
+                    "total": total_images,
+                    "percent": percent,
+                }
+            )
 
     watcher = threading.Thread(target=progress_loop, daemon=True)
     watcher.start()
