@@ -46,10 +46,16 @@
 
 `--format cbz` 只需要标准库，不用额外依赖。
 
-## License
+## 许可证与致谢
 
 本项目基于 [MIT License](LICENSE) 发布。
 
 Copyright (c) 2026 yifenliwu
 
-本插件在运行时调用的第三方软件（[jmcomic](https://pypi.org/project/jmcomic/)、Calibre 及其插件接口）遵循其各自的原许可证，本项目不包含、不重新分发其代码。
+### 致谢
+
+- [jmcomic-calibre](https://github.com/yifenliwu/jmcomic-calibre) —— 本项目的上游。本插件由其 `jmcal` CLI 改造而来，图片自然排序打包与 OPF 元数据生成逻辑源自上游实现。
+- [jmcomic](https://pypi.org/project/jmcomic/) —— 提供漫画下载引擎。
+- [Calibre](https://calibre-ebook.com/) —— 本插件基于其插件接口开发。
+
+上述第三方软件遵循其各自的原许可证，本项目不包含、不重新分发其代码。
