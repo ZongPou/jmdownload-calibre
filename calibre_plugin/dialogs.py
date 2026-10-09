@@ -200,7 +200,7 @@ class DownloadDialog(QDialog):
         self._worker = DownloadWorker(
             ids, self._python_cmd, self.gui.current_db
         )
-        self._worker.event.connect(self.on_worker_event)
+        self._worker.message_received.connect(self.on_worker_event)
         self._worker.finished.connect(self.on_worker_finished)
         self._worker.finished.connect(self._worker.deleteLater)
         self.set_downloading_ui(True)

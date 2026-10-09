@@ -27,7 +27,7 @@ class DownloadWorker(QThread):
     下载成功后在本线程内完成打包入库（ingest.create_book）。
     """
 
-    event = pyqtSignal(object)
+    message_received = pyqtSignal(object)
 
     def __init__(
         self, album_ids: list[str], python_cmd: list[str], db, parent=None
@@ -85,7 +85,7 @@ class DownloadWorker(QThread):
         if proxy:
             cmd += ["--proxy", proxy]
 
-        self.event.emit({"event": "album_start", "album_id": album_id})
+        self.message_received.emit({"event": "album_start", "album_id": album_id})
         try:
             self._proc = subprocess.Popen(
                 cmd,
@@ -122,7 +122,7 @@ class DownloadWorker(QThread):
                 if len(log_tail) > 30:
                     del log_tail[:-30]
             ev["album_id"] = album_id
-            self.event.emit(ev)
+            self.message_received.emit(ev)
 
         proc.wait()
         returncode = proc.returncode
@@ -152,7 +152,7 @@ class DownloadWorker(QThread):
 
         # ---- 阶段 3：打包入库 ----
         meta = self._meta.get(album_id, {})
-        self.event.emit(
+        self.message_received.emit(
             {
                 "event": "ingesting",
                 "album_id": album_id,
@@ -170,7 +170,7 @@ class DownloadWorker(QThread):
                 prefs["web_domain"],
             )
         except Exception as exc:
-            self.event.emit({
+            self.message_received.emit({
                 "event": "log",
                 "message": "入库失败堆栈:\n" + traceback.format_exc(),
             })
@@ -179,13 +179,13 @@ class DownloadWorker(QThread):
 
         if outcome["status"] == "skipped":
             self.skipped_ids.append(album_id)
-            self.event.emit({"event": "skipped", "album_id": album_id, **outcome})
+            self.message_received.emit({"event": "skipped", "album_id": album_id, **outcome})
             if not keep and os.path.isdir(out_dir):
                 shutil.rmtree(out_dir, ignore_errors=True)
             return True
 
         self.ok_ids.append(album_id)
-        self.event.emit({"event": "ingested", "album_id": album_id, **outcome})
+        self.message_received.emit({"event": "ingested", "album_id": album_id, **outcome})
         if not keep and os.path.isdir(out_dir):
             shutil.rmtree(out_dir, ignore_errors=True)
         return True
@@ -195,8 +195,8 @@ class DownloadWorker(QThread):
         try:
             bridge_path = self._extract_bridge()
         except Exception as exc:
-            self.event.emit({"event": "error", "message": str(exc)})
-            self.event.emit({"event": "all_done"})
+            self.message_received.emit({"event": "error", "message": str(exc)})
+            self.message_received.emit({"event": "all_done"})
             return
         try:
             for album_id in self.album_ids:
@@ -209,7 +209,7 @@ class DownloadWorker(QThread):
                     os.unlink(bridge_path)
                 except OSError:
                     pass
-        self.event.emit(
+        self.message_received.emit(
             {
                 "event": "all_done",
                 "ok": self.ok_ids,
