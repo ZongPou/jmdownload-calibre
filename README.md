@@ -48,4 +48,8 @@
 
 ## License
 
-MIT
+本项目基于 [MIT License](LICENSE) 发布。
+
+Copyright (c) 2026 yifenliwu
+
+本插件在运行时调用的第三方软件（[jmcomic](https://pypi.org/project/jmcomic/)、Calibre 及其插件接口）遵循其各自的原许可证，本项目不包含、不重新分发其代码。
