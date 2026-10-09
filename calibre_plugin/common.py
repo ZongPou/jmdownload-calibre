@@ -71,6 +71,7 @@ PROBE_CODE = (
 )
 
 _PROBE_TIMEOUT = 20  # 秒；Store 存根/损坏解释器要尽快放弃
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # 防止弹出控制台黑框
 
 
 def python_candidates(
@@ -134,6 +135,7 @@ def probe_interpreter(
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            creationflags=_CREATE_NO_WINDOW,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "error": str(exc), "cmd": cmd}

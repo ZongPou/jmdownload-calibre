@@ -212,13 +212,19 @@ class DownloadDialog(QDialog):
             parts.append("失败 %d 本：%s" % (len(failed), detail))
         self.status_label.setText("；".join(parts) or "无任务")
         if ok:
-            # add_books 直写数据库，GUI 视图需要手动触发刷新
-            try:
-                self.gui.library_view.model().books_added(len(ok))
-                self.gui.refresh_cover_browser()
-                self.gui.tags_view.recount()
-            except Exception:
-                pass
+            # add_books 直写数据库，GUI 视图需要手动触发刷新；
+            # 各步骤独立容错，避免单点异常中断整条刷新链
+            gui = self.gui
+
+            def _step(func):
+                try:
+                    func()
+                except Exception:
+                    pass
+
+            _step(lambda: gui.library_view.model().books_added(len(ok)))
+            _step(lambda: gui.refresh_cover_browser())
+            _step(lambda: gui.tags_view.recount())
         self.update_preview()
 
     def on_worker_finished(self):
