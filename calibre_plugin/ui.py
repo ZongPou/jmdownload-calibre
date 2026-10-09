@@ -32,3 +32,16 @@ class InterfacePlugin(InterfaceAction):
 
         dialog = DownloadDialog(self.gui, self)
         dialog.exec()
+
+    # ---- 配置界面（首选项 → 插件 → 自定义插件） ----
+
+    def is_customizable(self):
+        return True
+
+    def config_widget(self):
+        from calibre_plugins.jmcomic2calibre.config_widget import ConfigWidget
+
+        return ConfigWidget()
+
+    def save_settings(self, config_widget):
+        config_widget.save_settings()

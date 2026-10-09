@@ -7,7 +7,8 @@
 
 from calibre.customize import InterfaceActionBase
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
+
 
 
 class Jmcomic2CalibrePlugin(InterfaceActionBase):
@@ -18,6 +19,22 @@ class Jmcomic2CalibrePlugin(InterfaceActionBase):
     )
     supported_platforms = ["windows", "osx", "linux"]
     author = "ZongPou"
-    version = (0, 2, 0)
+    version = (0, 2, 1)
     minimum_calibre_version = (7, 0, 0)
     actual_plugin = "calibre_plugins.jmcomic2calibre.ui:InterfacePlugin"
+
+    # ---- 配置界面 ----
+    # 首选项插件面板检查的是本包装类的 is_customizable，
+    # 而非 actual plugin，因此两个类都要实现。
+    # Qt 依赖延迟到方法调用时导入（首选项对话框本身就是 GUI 环境）。
+
+    def is_customizable(self):
+        return True
+
+    def config_widget(self):
+        from calibre_plugins.jmcomic2calibre.config_widget import ConfigWidget
+
+        return ConfigWidget()
+
+    def save_settings(self, config_widget):
+        config_widget.save_settings()
