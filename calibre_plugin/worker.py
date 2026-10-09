@@ -102,6 +102,7 @@ class DownloadWorker(QThread):
         downloaded_dir = None
         images = -1
         error_message = None
+        log_tail: list[str] = []  # 失败诊断：保留 jmcomic 输出最后几行
         proc = self._proc
         for line in proc.stdout:  # type: ignore[union-attr]
             ev = parse_event_line(line)
@@ -115,6 +116,10 @@ class DownloadWorker(QThread):
                 downloaded_dir, images = ev.get("dir"), ev.get("images", -1)
             elif ev["event"] == "error":
                 error_message = ev.get("message", "未知错误")
+            elif ev["event"] == "log":
+                log_tail.append(ev.get("message", ""))
+                if len(log_tail) > 30:
+                    del log_tail[:-30]
             ev["album_id"] = album_id
             self.event.emit(ev)
 
@@ -127,13 +132,21 @@ class DownloadWorker(QThread):
                 shutil.rmtree(downloaded_dir, ignore_errors=True)
             self.failed[album_id] = "已取消"
             return False
+        def fail_with_log(message: str) -> str:
+            tail = [s for s in log_tail if s.strip()][-3:]
+            return message + (
+                "（日志尾部: " + " / ".join(tail) + "）" if tail else ""
+            )
+
         if error_message is not None:
-            self.failed[album_id] = error_message
+            self.failed[album_id] = fail_with_log(error_message)
             if not keep and os.path.isdir(out_dir):
                 shutil.rmtree(out_dir, ignore_errors=True)
             return False
         if returncode != 0:
-            self.failed[album_id] = f"bridge 异常退出（码 {returncode}）"
+            self.failed[album_id] = fail_with_log(
+                f"bridge 异常退出（码 {returncode}）"
+            )
             return False
 
         # ---- 阶段 3：打包入库 ----
