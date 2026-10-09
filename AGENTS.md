@@ -45,8 +45,10 @@
 
 ## 阶段计划与进度
 
-1. [ ] 插件骨架：`calibre_plugin/`（plugin-import-name 标记、双层 `__init__.py`/`ui.py`）、
+1. [x] 插件骨架：`calibre_plugin/`（plugin-import-name 标记、双层 `__init__.py`/`ui.py`）、
        ID 输入对话框、JSONConfig（python_path/域名/代理/格式）、doctor 环境探测、构建 zip 脚本
+       （2026-10-10 完成；纯逻辑集中在 common.py 供离线单测；`python build_plugin.py` 出
+       dist/jmcomic2calibre-v0.1.0.zip；`python -m unittest tests.test_plugin` 27 项全过）
 2. [ ] 子进程下载桥：调用系统 Python 跑下载 + 元数据采集，stdout JSON-lines 事件协议（进度/结果/错误）
 3. [ ] 入库：CBZ 打包（含 ComicInfo.xml）+ add_books（判重跳过/双标识符/封面）
 4. [ ] 批量 ID、进度对话框、取消、错误处理、配置界面完善
