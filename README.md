@@ -1,35 +1,33 @@
-# jmdownload-calibre
+<p align="center">
+  <img src="calibre_plugin/images/icon.png" alt="JMdownload 图标" width="180">
+</p>
 
-一个车牌，把jm本子导入至Calibre书库并自带元数据，无需手动编辑。
-
-下载 → 转 PDF/CBZ → 生成 `metadata.opf` → 导入 Calibre，标题、作者、标签、简介一次到位。
-
-> One command to get your JMComic albums into Calibre — download, convert, tag, import.
+<h1 align="center">jmdownload-calibre</h1>
 
 ## 插件功能
 
-输入一个或多个 JM 漫画 ID（也支持网页链接），点击下载即可自动获取漫画、打包 CBZ 并导入当前 Calibre 书库。
-
-插件会自动写入标题、作者、标签、简介、发布日期和封面等元数据，无需手动整理文件或编辑书籍信息；同时支持批量输入、重复检测、进度显示、取消下载和日志诊断。
+- **下载导入**：输入 JM 漫画 ID 或网页链接，自动下载、打包 CBZ 并导入 Calibre。
+- **自动元数据**：写入标题、作者、标签、简介、日期和封面，无需手动编辑。
+- **批量管理**：支持多条输入、重复检测、进度显示、取消下载和日志诊断。
+- **项目搭配**：结合 [calibre-metamanga](https://github.com/ZongPou/calibre-metamanga)，使用 AI 识别并更正元数据。
+- **完整流程**：下载 → 打包 → 导入 → AI 校正，减少手动管理。
 
 ### 安装插件
 
-1. 前往本项目的 [Releases 页面](https://github.com/ZongPou/jmdownload-calibre/releases)，下载最新版本的 `jmdownload-calibre-v<version>.zip`。
-2. 打开 Calibre：**首选项 → 插件 → 从文件加载插件**，选择下载的 zip。
-3. 确认安装并重启 Calibre。
-4. 在系统 Python 中安装下载引擎：
+- 前往本项目的 [Releases 页面](https://github.com/ZongPou/jmdownload-calibre/releases)，下载最新版本的插件 zip 包，不要解压。
+- 打开 Calibre：**首选项 → 插件 → 从文件加载插件**，选择下载的 zip。
+- 确认安装并重启 Calibre。
+- 在系统 Python 中安装下载引擎：
 
    ```bash
    python -m pip install jmcomic
    ```
 
-插件不会把 jmcomic 及其二进制依赖打进 zip，而是调用系统 Python。安装后可在 **JMdownload → 环境检测** 中确认解释器和 jmcomic 是否可用。
-
 ### 使用插件
 
-1. 点击 Calibre 工具栏中的 **JMdownload**。
-2. 输入一个或多个漫画 ID/网页链接，每行一个；空行和 `#` 注释行会被忽略。
-3. 点击下载。插件会显示每本漫画的进度，完成后将带有标题、作者、标签、简介、日期和封面的 CBZ 直接导入当前书库。
+- 点击 Calibre 工具栏中的 **JMdownload**。
+- 输入一个或多个漫画 ID/网页链接，每行一个；空行和 `#` 注释行会被忽略。
+- 点击下载。插件会显示每本漫画的进度，完成后将带有标题、作者、标签、简介、日期和封面的 CBZ 直接导入当前书库。
 
 插件还支持：
 
@@ -37,6 +35,12 @@
 - `url:` 标识符，支持从书籍元数据回到漫画页面
 - 代理、临时目录、解释器和网站域名配置
 - 会话日志复制与环境诊断
+
+## 界面截图
+
+![JMdownload 下载窗口](docs/screenshots/jmdownload-window.png)
+
+JMdownload 窗口支持输入漫画 ID 或网页链接，并在下载前检测 Python 与 jmcomic 运行环境。
 
 ## 环境要求
 

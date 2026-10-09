@@ -60,7 +60,7 @@ class DownloadDialog(QDialog):
         self._total_images = 0  # 当前本的预期图片总数（meta 事件带来）
         self._log_lines = []  # 会话日志（带时间戳，供一键复制）
 
-        self.setWindowTitle("JMComic 下载")
+        self.setWindowTitle("JMdownload 下载")
         self.setMinimumWidth(520)
 
         layout = QVBoxLayout(self)
@@ -69,7 +69,7 @@ class DownloadDialog(QDialog):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        layout.addWidget(QLabel("每行一个漫画 ID 或网页链接（# 开头为注释）："))
+        layout.addWidget(QLabel("每行一个漫画 ID 或网页链接："))
         self.input_edit = QPlainTextEdit()
         self.input_edit.setPlaceholderText(
             "例如：\n350234\nhttps://18comic.vip/album/350234/"
@@ -130,7 +130,7 @@ class DownloadDialog(QDialog):
         except Exception:
             calibre_version = "未知"
         header = [
-            "JMComic Downloader 日志",
+            "JMdownload 日志",
             "插件版本: %s | calibre 版本: %s" % (self._version_text(), calibre_version),
             "系统: Windows | 导出时间: %s"
             % datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

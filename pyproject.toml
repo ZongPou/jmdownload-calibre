@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "jmcomic-calibre"
+name = "jmdownload-calibre"
 dynamic = ["version"]
 description = "JMComic → Calibre 一键入库：下载、转 PDF/CBZ、写元数据、导入书库"
 readme = "README.md"
@@ -32,8 +32,8 @@ dev = ["ruff", "pytest"]
 jmcal = "jmcomic_calibre.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yifenliwu/jmcomic-calibre"
-Issues = "https://github.com/yifenliwu/jmcomic-calibre/issues"
+Homepage = "https://github.com/ZongPou/jmdownload-calibre"
+Issues = "https://github.com/ZongPou/jmdownload-calibre/issues"
 
 [tool.hatch.version]
 path = "src/jmcomic_calibre/__init__.py"

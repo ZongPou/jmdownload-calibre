@@ -8,7 +8,7 @@
 输入禁漫漫画 ID → 自动下载 → 打包 CBZ（内嵌 ComicInfo.xml）→ 带元数据直接入库 Calibre。
 
 **当前状态：v0.2.7，阶段 1-4 全部完成并通过用户验收，处于阶段 5（发布）**。
-- 发布物：`dist/jmcomic2calibre-v0.2.7.zip`（23.0 KB）
+- 发布物：`dist/jmdownload-calibre-v0.2.7.zip`（构建产物）
 - 本地 main 领先 origin/main **25 个提交**（未推送）
 - 测试：`python -m unittest tests.test_plugin`，45 项全过（离线，不碰网络）
 - 工作树 clean
@@ -57,7 +57,8 @@
 
 - Calibre 9.15（内嵌 Python 3.14；JSONConfig 无 defaults 参数，用 setdefault 注入默认值）
 - 系统 Python 3.13.13 @ `C:\Program Files\Python313\python.exe`；jmcomic 2.7.8（--user 安装）
-- git remote：`origin` = ZongPou/jmcomic2calibre（用户 fork），`upstream` = yifenliwu/jmcomic-calibre
+- 公开仓库目标：`ZongPou/jmdownload-calibre`；内部插件包名保持 `jmcomic2calibre`
+- git remote：当前工作区仍指向旧远程，待用户在 GitHub 完成仓库改名后再更新 remote
 - 本地仓库根 = 工作区根 `c:/Users/zongp/Documents/ChatGPT/jmcomic2calibre`
 - 诊断脚本：`scripts/diag_meta.py`（查元数据定位网络问题）、`scripts/diag_fields.py`（字段探测）、
   bridge.py `--meta-only`
@@ -78,7 +79,7 @@
 5. [ ] **发布（进行中，交接简报见 reports/release/）**：
    - push 25 个提交到 origin/main（需用户凭证）
    - 打 tag `v0.2.7` 并推送
-   - 创建 GitHub Release：标题 `v0.2.7`，上传 `dist/jmcomic2calibre-v0.2.7.zip`，
+   - 创建 GitHub Release：标题 `v0.2.7`，上传 `dist/jmdownload-calibre-v0.2.7.zip`，
      说明文案见交接简报第三节
    - README 增补插件安装/使用说明（仓库现有 README 是上游 CLI 的）
 

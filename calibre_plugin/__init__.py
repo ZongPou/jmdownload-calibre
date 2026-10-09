@@ -1,4 +1,4 @@
-"""JMComic Downloader —— Calibre InterfaceAction 插件入口。
+"""JMdownload —— Calibre InterfaceAction 插件入口。
 
 本文件只做插件元数据包装，不 import 任何 GUI 库（Qt / calibre.gui2），
 保证 calibre-customize / 命令行环境下也能安全加载。
@@ -12,7 +12,7 @@ __version__ = "0.2.7"
 
 
 class Jmcomic2CalibrePlugin(InterfaceActionBase):
-    name = "JMComic Downloader"
+    name = "JMdownload"
     description = (
         "输入禁漫漫画 ID：自动下载、打包 CBZ（内嵌 ComicInfo.xml）"
         "并带元数据直接入库 Calibre"

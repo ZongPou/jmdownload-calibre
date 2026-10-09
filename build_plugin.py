@@ -1,7 +1,7 @@
 """把 calibre_plugin/ 打包成可安装的 Calibre 插件 zip。
 
 纯标准库实现，任何 Python 3.9+ 均可运行，无需安装 Calibre：
-    python build_plugin.py           # 输出 dist/jmcomic2calibre-v<version>.zip
+    python build_plugin.py           # 输出 dist/jmdownload-calibre-v<version>.zip
     python build_plugin.py --outdir <目录>
 安装：calibre → 首选项 → 插件 → 从文件加载插件，或命令行 calibre-customize -a <zip>
 """
@@ -50,7 +50,7 @@ def build(out_dir: str | Path | None = None, plugin_dir: Path = PLUGIN_DIR) -> P
     version = read_version(plugin_dir)
     dest = Path(out_dir) if out_dir else ROOT / "dist"
     dest.mkdir(parents=True, exist_ok=True)
-    out_path = dest / f"jmcomic2calibre-v{version}.zip"
+    out_path = dest / f"jmdownload-calibre-v{version}.zip"
 
     files = collect_files(plugin_dir)
     top_names = {f.relative_to(plugin_dir).as_posix() for f in files}

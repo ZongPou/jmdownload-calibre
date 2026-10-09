@@ -14,9 +14,9 @@ from calibre.gui2.actions import InterfaceAction
 
 class InterfacePlugin(InterfaceAction):
 
-    name = "JMComic Downloader"
+    name = "JMdownload"
     action_spec = (
-        "JMComic 下载",
+        "JMdownload",
         None,  # 图标在 genesis 里加载
         "输入禁漫漫画 ID，下载打包入库 Calibre",
         None,  # 快捷键
@@ -57,7 +57,7 @@ class InterfacePlugin(InterfaceAction):
         from calibre_plugins.jmcomic2calibre.config_widget import ConfigWidget
 
         dialog = QDialog(self.gui)
-        dialog.setWindowTitle("JMComic 设置")
+        dialog.setWindowTitle("JMdownload 设置")
         layout = QVBoxLayout(dialog)
         widget = ConfigWidget()
         layout.addWidget(widget)
@@ -83,7 +83,7 @@ class InterfacePlugin(InterfaceAction):
         def on_done(result):
             info_dialog(
                 self.gui,
-                "JMComic 环境检测",
+                "JMdownload 环境检测",
                 describe_probe(result),
                 show=True,
             )
