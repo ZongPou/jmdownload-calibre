@@ -94,7 +94,8 @@ class DownloadWorker(QThread):
         downloaded_dir = None
         images = -1
         error_message = None
-        for line in self._proc.stdout:  # type: ignore[union-attr]
+        proc = self._proc
+        for line in proc.stdout:  # type: ignore[union-attr]
             ev = parse_event_line(line)
             if ev is None:
                 continue
@@ -105,8 +106,9 @@ class DownloadWorker(QThread):
             ev["album_id"] = album_id
             self.event.emit(ev)
 
-        self._proc.wait()
-        self._proc = None
+        proc.wait()
+        returncode = proc.returncode
+        self._proc = None  # 进程已结束，取消不再需要引用；退出码已保存
 
         if self._cancelled:
             if not keep and downloaded_dir and os.path.isdir(downloaded_dir):
@@ -118,8 +120,8 @@ class DownloadWorker(QThread):
             if not keep and os.path.isdir(out_dir):
                 shutil.rmtree(out_dir, ignore_errors=True)
             return False
-        if self._proc.returncode != 0:
-            self.failed[album_id] = f"bridge 异常退出（码 {self._proc.returncode}）"
+        if returncode != 0:
+            self.failed[album_id] = f"bridge 异常退出（码 {returncode}）"
             return False
 
         self.ok_ids.append(album_id)
