@@ -24,6 +24,23 @@ import sys
 import threading
 import traceback
 
+
+def _isolate_script_dir() -> None:
+    """把脚本所在目录移出 sys.path。
+
+    jmcomic 内部使用裸导入 `from common import time_stamp, ...`（依赖
+    commonx 提供的顶层 common 模块）；本文件可能被提取到任意目录运行，
+    若同目录恰好有名为 common.py 的模块（例如插件打包目录）就会劫持
+    该导入导致 ImportError。与标准库无关，可安全隔离。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path[:] = [
+        p for p in sys.path if p and os.path.abspath(p) != here
+    ]
+
+
+_isolate_script_dir()
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 PROGRESS_INTERVAL = 1.5  # 秒
 
@@ -37,6 +54,11 @@ def parse_args(argv=None):
     parser.add_argument("--album-id", required=True, help="漫画 ID")
     parser.add_argument("--out-dir", required=True, help="图片输出目录")
     parser.add_argument("--proxy", default="", help="代理地址（可选）")
+    parser.add_argument(
+        "--meta-only",
+        action="store_true",
+        help="只获取元数据用于诊断，不下载图片",
+    )
     return parser.parse_args(argv)
 
 
@@ -51,7 +73,9 @@ def count_images(out_dir: str) -> int:
     return total
 
 
-def fetch_meta_and_download(album_id: str, out_dir: str, proxy: str) -> None:
+def fetch_meta_and_download(
+    album_id: str, out_dir: str, proxy: str, meta_only: bool = False
+) -> None:
     import jmcomic  # 系统环境里的 jmcomic
 
     os.makedirs(out_dir, exist_ok=True)
@@ -87,6 +111,11 @@ def fetch_meta_and_download(album_id: str, out_dir: str, proxy: str) -> None:
             n = count_images(out_dir)
             emit({"event": "progress", "images": n, "percent": None})
 
+    if meta_only:
+        emit({"event": "log", "message": "--meta-only 跳过下载"})
+        emit({"event": "downloaded", "dir": out_dir, "images": 0})
+        return
+
     watcher = threading.Thread(target=progress_loop, daemon=True)
     watcher.start()
     try:
@@ -111,7 +140,9 @@ def main(argv=None) -> None:
     except Exception:
         pass
     try:
-        fetch_meta_and_download(args.album_id, args.out_dir, args.proxy)
+        fetch_meta_and_download(
+            args.album_id, args.out_dir, args.proxy, args.meta_only
+        )
     except Exception as exc:
         emit(
             {
