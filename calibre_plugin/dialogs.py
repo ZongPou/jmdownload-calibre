@@ -135,7 +135,9 @@ class DownloadDialog(QDialog):
             return
         from calibre_plugins.jmcomic2calibre.worker import DownloadWorker
 
-        self._worker = DownloadWorker(ids, self._python_cmd, self)
+        self._worker = DownloadWorker(
+            ids, self._python_cmd, self.gui.current_db.new_api, self
+        )
         self._worker.event.connect(self.on_worker_event)
         self._worker.finished.connect(self.on_worker_finished)
         self.set_downloading_ui(True)
@@ -172,6 +174,19 @@ class DownloadDialog(QDialog):
             )
         elif kind == "album_ok":
             pass  # 汇总在 all_done
+        elif kind == "ingesting":
+            self._album_start_text = "正在打包入库《%s》…" % ev.get("title", "")
+            self.status_label.setText(self._album_start_text)
+        elif kind == "ingested":
+            self.status_label.setText(
+                "已入库：《%s》→ 书号 %s（metadata.opf 已同步生成）"
+                % (ev.get("title", ev.get("album_id")), ev.get("book_id"))
+            )
+        elif kind == "skipped":
+            self.status_label.setText(
+                "已在书库，跳过：%s（书号 %s）"
+                % (ev.get("album_id"), ev.get("book_id"))
+            )
         elif kind == "error":
             self.status_label.setText("错误：%s" % ev.get("message", ""))
         elif kind == "all_done":
@@ -179,23 +194,29 @@ class DownloadDialog(QDialog):
 
     def report_all_done(self, ev):
         ok = ev.get("ok") or []
+        skipped = ev.get("skipped") or []
         failed = ev.get("failed") or {}
         self.progress_bar.setVisible(False)
         self.set_downloading_ui(False)
         self._worker = None
-        if ok and not failed:
-            self.status_label.setText(
-                "完成：%s（共 %d 本）。打包入库将在阶段 3 接入。"
-                % ("、".join(ok), len(ok))
+        parts = []
+        if ok:
+            parts.append("入库 %d 本：%s" % (len(ok), "、".join(ok)))
+        if skipped:
+            parts.append("跳过（已在书库）：%s" % "、".join(skipped))
+        if failed:
+            parts.append(
+                "失败 %d 本：%s" % (len(failed), "；".join(sorted(failed)))
             )
-        elif ok:
-            self.status_label.setText(
-                "完成 %d 本：%s；失败 %d 本：%s"
-                % (len(ok), "、".join(ok), len(failed), "；".join(sorted(failed)))
-            )
-        else:
-            detail = "；".join("%s: %s" % (k, v) for k, v in failed.items())
-            self.status_label.setText("下载失败：%s" % (detail or "未知原因"))
+        self.status_label.setText("；".join(parts) or "无任务")
+        if ok:
+            # add_books 直写数据库，GUI 视图需要手动触发刷新
+            try:
+                self.gui.library_view.model().books_added()
+                self.gui.refresh_cover_browser()
+                self.gui.tags_view.recount()
+            except Exception:
+                pass
         self.update_preview()
 
     def on_worker_finished(self):

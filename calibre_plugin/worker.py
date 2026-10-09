@@ -21,17 +21,25 @@ _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 class DownloadWorker(QThread):
-    """album_ids 队列逐个下载；event 信号把事件 dict 发回 UI 线程。"""
+    """album_ids 队列逐个下载；event 信号把事件 dict 发回 UI 线程。
+
+    下载成功后在本线程内完成打包入库（ingest.create_book）。
+    """
 
     event = pyqtSignal(object)
 
-    def __init__(self, album_ids: list[str], python_cmd: list[str], parent=None):
+    def __init__(
+        self, album_ids: list[str], python_cmd: list[str], db_api, parent=None
+    ):
         super().__init__(parent)
         self.album_ids = list(album_ids)
         self.python_cmd = list(python_cmd)
+        self.db_api = db_api
         self._proc: subprocess.Popen | None = None
         self._cancelled = False
+        self._meta: dict[str, dict] = {}
         self.ok_ids: list[str] = []
+        self.skipped_ids: list[str] = []
         self.failed: dict[str, str] = {}
 
     # ---- 对外：取消 ----
@@ -99,7 +107,11 @@ class DownloadWorker(QThread):
             ev = parse_event_line(line)
             if ev is None:
                 continue
-            if ev["event"] == "downloaded":
+            if ev["event"] == "meta":
+                self._meta[album_id] = {
+                    k: v for k, v in ev.items() if k not in ("event", "album_id")
+                }
+            elif ev["event"] == "downloaded":
                 downloaded_dir, images = ev.get("dir"), ev.get("images", -1)
             elif ev["event"] == "error":
                 error_message = ev.get("message", "未知错误")
@@ -124,15 +136,40 @@ class DownloadWorker(QThread):
             self.failed[album_id] = f"bridge 异常退出（码 {returncode}）"
             return False
 
-        self.ok_ids.append(album_id)
+        # ---- 阶段 3：打包入库 ----
+        meta = self._meta.get(album_id, {})
         self.event.emit(
             {
-                "event": "album_ok",
+                "event": "ingesting",
                 "album_id": album_id,
-                "dir": downloaded_dir or out_dir,
-                "images": images,
+                "title": str(meta.get("title") or album_id),
             }
         )
+        try:
+            from calibre_plugins.jmcomic2calibre.ingest import create_book
+
+            outcome = create_book(
+                album_id,
+                downloaded_dir or out_dir,
+                meta,
+                self.db_api,
+                prefs["web_domain"],
+            )
+        except Exception as exc:
+            self.failed[album_id] = f"入库失败: {exc}"
+            return False
+
+        if outcome["status"] == "skipped":
+            self.skipped_ids.append(album_id)
+            self.event.emit({"event": "skipped", "album_id": album_id, **outcome})
+            if not keep and os.path.isdir(out_dir):
+                shutil.rmtree(out_dir, ignore_errors=True)
+            return True
+
+        self.ok_ids.append(album_id)
+        self.event.emit({"event": "ingested", "album_id": album_id, **outcome})
+        if not keep and os.path.isdir(out_dir):
+            shutil.rmtree(out_dir, ignore_errors=True)
         return True
 
     def run(self):
@@ -155,5 +192,10 @@ class DownloadWorker(QThread):
                 except OSError:
                     pass
         self.event.emit(
-            {"event": "all_done", "ok": self.ok_ids, "failed": dict(self.failed)}
+            {
+                "event": "all_done",
+                "ok": self.ok_ids,
+                "skipped": self.skipped_ids,
+                "failed": dict(self.failed),
+            }
         )

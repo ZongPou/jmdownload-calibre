@@ -4,6 +4,7 @@
     python -m unittest tests.test_plugin -v
 """
 
+import os
 import sys
 import tempfile
 import types
@@ -38,6 +39,14 @@ from calibre_plugin.common import (
     parse_probe_output,
     probe_interpreter,
     python_candidates,
+)
+from calibre_plugin.packaging import (
+    build_comicinfo_xml,
+    build_web_url,
+    collect_images,
+    pack_cbz,
+    parse_published,
+    sanitize_filename,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -282,6 +291,93 @@ class TestParseEventLine(unittest.TestCase):
     def test_non_dict_json_becomes_log(self):
         ev = parse_event_line("[1, 2, 3]")
         self.assertEqual("log", ev["event"])
+
+
+class TestPackaging(unittest.TestCase):
+    def test_build_web_url(self):
+        self.assertEqual(
+            "https://18comic.vip/album/350234/",
+            build_web_url("https://18comic.vip/", "350234"),
+        )
+        self.assertEqual(
+            "https://18comic.vip/album/1/",
+            build_web_url(None, "1"),
+        )
+
+    def test_parse_published_formats(self):
+        from datetime import datetime
+
+        self.assertEqual(datetime(2024, 1, 15), parse_published("2024-01-15"))
+        self.assertEqual(datetime(2024, 1, 15), parse_published("2024/1/15"))
+        self.assertEqual(
+            datetime(2024, 1, 15, 10, 30, 0),
+            parse_published("2024-01-15 10:30:00"),
+        )
+        self.assertEqual(datetime(2024, 1, 5), parse_published("2024年1月5日"))
+        self.assertIsNone(parse_published("未知格式"))
+        self.assertIsNone(parse_published(""))
+        self.assertIsNone(parse_published(None))
+
+    def test_sanitize_filename(self):
+        self.assertEqual("标题_A_B_", sanitize_filename("标题:A/B?", "1"))
+        self.assertEqual("1", sanitize_filename("", "1"))
+        self.assertEqual("1", sanitize_filename("  ", "1"))
+
+    def test_comicinfo_fields(self):
+        xml = build_comicinfo_xml(
+            {
+                "title": "测试本子 <I>",
+                "authors": ["作者A", "作者B"],
+                "tags": ["全彩", "中文"],
+                "description": "简介 & 说明",
+                "published": "2024-01-15",
+            },
+            "https://18comic.vip/album/350234/",
+            200,
+        )
+        self.assertIn("<Series>测试本子 &lt;I&gt;</Series>", xml)
+        self.assertIn("<Writer>作者A, 作者B</Writer>", xml)
+        self.assertIn("<Summary>简介 &amp; 说明</Summary>", xml)
+        self.assertIn("<Year>2024</Year>", xml)
+        self.assertIn("<Month>1</Month>", xml)
+        self.assertIn("<Day>15</Day>", xml)
+        self.assertIn("<Genre>全彩, 中文</Genre>", xml)
+        self.assertIn("<Tags>全彩, 中文</Tags>", xml)
+        self.assertIn("<LanguageISO>zh</LanguageISO>", xml)
+        self.assertIn("<Web>https://18comic.vip/album/350234/</Web>", xml)
+        self.assertIn("<PageCount>200</PageCount>", xml)
+        self.assertTrue(xml.startswith("<?xml"))
+
+    def test_comicinfo_empty_meta(self):
+        xml = build_comicinfo_xml({}, "https://x/album/1/", 0)
+        self.assertNotIn("<Writer>", xml)
+        self.assertNotIn("<Year>", xml)
+        self.assertNotIn("<PageCount>", xml)
+
+    def test_collect_images_natural_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("10.jpg", "2.jpg", "1.jpg", "note.txt"):
+                open(os.path.join(tmp, name), "wb").close()
+            subdir = os.path.join(tmp, "sub")
+            os.mkdir(subdir)
+            open(os.path.join(subdir, "3.png"), "wb").close()
+            names = [os.path.basename(p) for p in collect_images(tmp)]
+            self.assertEqual(["1.jpg", "2.jpg", "3.png", "10.jpg"], names)
+
+    def test_pack_cbz_structure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("1.jpg", "2.jpg"):
+                open(os.path.join(tmp, name), "wb").close()
+            out = os.path.join(tmp, "out.cbz")
+            pack_cbz(collect_images(tmp), "<ComicInfo/>", out)
+            with zipfile.ZipFile(out) as zf:
+                names = zf.namelist()
+            self.assertEqual("ComicInfo.xml", names[0])
+            self.assertEqual(["ComicInfo.xml", "1.jpg", "2.jpg"], names)
+
+    def test_pack_cbz_empty_raises(self):
+        with self.assertRaises(ValueError):
+            pack_cbz([], "<ComicInfo/>", os.path.join(tempfile.gettempdir(), "x.cbz"))
 
 
 if __name__ == "__main__":

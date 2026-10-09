@@ -53,7 +53,11 @@
        （2026-10-10 完成；`calibre_plugin/bridge.py` 由系统 Python 执行、进度为轮询统计图片数、
        stdout 仅 JSON 行；`worker.py` 负责提取 bridge/子进程管理/取消；对话框接入 busy 进度条与
        下载/取消切换；事件行解析 parse_event_line 在 common.py 供离线单测）
-3. [ ] 入库：CBZ 打包（含 ComicInfo.xml）+ add_books（判重跳过/双标识符/封面）
+3. [x] 入库：CBZ 打包（含 ComicInfo.xml）+ add_books（判重跳过/双标识符/封面）
+       （2026-10-10 完成；`packaging.py` 自然排序以文件名为键（jm 产物平铺、页码在文件名）、
+       ComicInfo 字段映射 Title/Series/Writer/Summary/Y-M-D/Genre+Tags/LanguageISO=zh/Web/PageCount；
+       `ingest.py` 判重 get_book_id_from_identifier→Metadata（cover_data 取首图 webp 转 jpg）→
+       add_books；入库后触发 books_added 刷新视图；成功/跳过时清理下载临时目录）
 4. [ ] 批量 ID、进度对话框、取消、错误处理、配置界面完善
 5. [ ] 发布：构建产物 zip 不进 git，GitHub Release 由用户发布
 
