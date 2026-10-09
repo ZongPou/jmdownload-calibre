@@ -63,12 +63,14 @@ def create_book(
     title = str(meta.get("title") or album_id)
     result = {"status": "failed", "book_id": None, "title": title, "message": ""}
 
-    # 1. 判重（jmcomic:<id>）——在打包前，省掉无用 IO
-    existing, _err = db_api.get_book_id_from_identifier(f"jmcomic:{album_id}")
-    if existing:
+    # 1. 判重（jmcomic:<id>）——在打包前，省掉无用 IO。
+    #    new_api(Cache) 没有 get_book_id_from_identifier（那是旧版 legacy API），
+    #    用 identifiers 精确搜索（"=" 前缀）代替。
+    matches = db_api.search(f'identifiers:"=jmcomic:{album_id}"')
+    if matches:
         return {
             "status": "skipped",
-            "book_id": existing,
+            "book_id": sorted(matches)[0],
             "title": title,
             "message": "已存在于书库",
         }
