@@ -3,6 +3,10 @@
 下载走 worker.DownloadWorker（子进程桥调用系统 Python 的 jmcomic），
 本类只负责 UI 状态机与事件展示。
 进度条双模式：拿到总页数（meta.total_images）后为百分比模式，否则 busy。
+
+线程生命周期（防闪退）：worker 无 Qt parent；finished 同时连接
+on_worker_finished（UI 复位）与 deleteLater（Qt 事件循环安全删除）；
+结束后 Python 引用保留在 self._worker，直到下次下载覆盖。
 """
 
 from qt.core import (
@@ -44,6 +48,7 @@ class DownloadDialog(QDialog):
         self.gui = plugin.gui  # calibre 主窗口引用（书库刷新用）
         self._probe = None
         self._worker = None
+        self._downloading = False
         self._python_cmd = None  # doctor 探测到的解释器命令
         self._album_start_text = ""
         self._total_images = 0  # 当前本的预期图片总数（meta 事件带来）
@@ -118,13 +123,13 @@ class DownloadDialog(QDialog):
             more = "（还有 %d 行）" % (len(errors) - 5) if len(errors) > 5 else ""
             parts.append("无法识别：%s%s" % (shown, more))
         self.preview_label.setText("\n".join(parts))
-        if self._worker is None:
+        if not self._downloading:
             self.download_button.setEnabled(bool(ids))
 
     # ---- 下载 ----
 
     def on_download_clicked(self):
-        if self._worker is not None:
+        if self._downloading:
             self._worker.cancel()
             self.download_button.setEnabled(False)
             self.status_label.setText("正在取消…")
@@ -138,11 +143,16 @@ class DownloadDialog(QDialog):
             return
         from calibre_plugins.jmcomic2calibre.worker import DownloadWorker
 
+        # worker 不设 parent：QThread 带父对象时，若线程未结束就被级联
+        # 销毁会硬崩（"Destroyed while thread is still running"）。
+        # 生命周期：finished → on_worker_finished（UI 复位）+ deleteLater
+        #（Qt 事件循环安全删除）；Python 引用保留到下次下载覆盖。
         self._worker = DownloadWorker(
-            ids, self._python_cmd, self.gui.current_db, self
+            ids, self._python_cmd, self.gui.current_db
         )
         self._worker.event.connect(self.on_worker_event)
         self._worker.finished.connect(self.on_worker_finished)
+        self._worker.finished.connect(self._worker.deleteLater)
         self.set_downloading_ui(True)
         self.status_label.setText("正在启动下载引擎…")
         self.progress_bar.setRange(0, 0)
@@ -150,6 +160,7 @@ class DownloadDialog(QDialog):
         self._worker.start()
 
     def set_downloading_ui(self, downloading: bool):
+        self._downloading = downloading
         self.input_edit.setEnabled(not downloading)
         self.reprobe_button.setEnabled(not downloading)
         self.download_button.setText("取消" if downloading else "开始下载")
@@ -224,7 +235,6 @@ class DownloadDialog(QDialog):
         failed = ev.get("failed") or {}
         self.progress_bar.setVisible(False)
         self.set_downloading_ui(False)
-        self._worker = None
         parts = []
         if ok:
             parts.append("入库 %d 本：%s" % (len(ok), "、".join(ok)))
@@ -253,11 +263,11 @@ class DownloadDialog(QDialog):
         self.update_preview()
 
     def on_worker_finished(self):
-        # 兜底：线程结束后 UI 必须复位
-        if self._worker is not None:
-            self.progress_bar.setVisible(False)
-            self.set_downloading_ui(False)
-            self._worker = None
+        # UI 复位。注意：不置 self._worker = None——QThread 的 C++ 线程
+        # 此刻可能尚未完全退出，解除 Python 引用会被 GC 触发析构导致闪退；
+        # C++ 对象由 deleteLater 在事件循环中安全删除，Python 引用保留到
+        # 下次下载覆盖。
+        self.set_downloading_ui(False)
 
     # ---- 生命周期 ----
 
@@ -266,5 +276,5 @@ class DownloadDialog(QDialog):
             self._probe.wait(3000)
         if self._worker is not None:
             self._worker.cancel()
-            self._worker.wait(5000)
+            self._worker.wait(5000)  # 超时也不销毁线程，由 deleteLater 兜底
         super().closeEvent(event)

@@ -128,7 +128,7 @@ class DownloadWorker(QThread):
         self._proc = None  # 进程已结束，取消不再需要引用；退出码已保存
 
         if self._cancelled:
-            if not keep and downloaded_dir and os.path.isdir(downloaded_dir):
+            if not keep and os.path.isdir(out_dir):
                 shutil.rmtree(downloaded_dir, ignore_errors=True)
             self.failed[album_id] = "已取消"
             return False
