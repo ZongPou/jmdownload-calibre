@@ -137,7 +137,7 @@ class DownloadDialog(QDialog):
         from calibre_plugins.jmcomic2calibre.worker import DownloadWorker
 
         self._worker = DownloadWorker(
-            ids, self._python_cmd, self.gui.current_db.new_api, self
+            ids, self._python_cmd, self.gui.current_db, self
         )
         self._worker.event.connect(self.on_worker_event)
         self._worker.finished.connect(self.on_worker_finished)

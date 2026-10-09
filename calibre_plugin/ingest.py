@@ -48,13 +48,15 @@ def create_book(
     album_id: str,
     out_dir: str,
     meta: dict,
-    db_api,
+    db,
     web_domain: str | None = None,
 ) -> dict:
     """下载目录 → CBZ（含 ComicInfo.xml）→ 入库。
 
     :param meta: bridge 的 meta 事件字段（title/authors/tags/description/published）
-    :param db_api: gui.current_db.new_api
+    :param db: gui.current_db（legacy LibraryDatabase）。入库必须走 legacy 层：
+               new_api.add_books 直写不会同步 GUI 的数据缓存，导致要重启才能
+               看到新书；legacy add_books 与"添加书籍"动作同路径，视图即时刷新。
     :returns: {'status': 'ingested'|'skipped'|'failed', 'book_id': int|None,
                'title': str, 'message': str}
     """
@@ -66,7 +68,7 @@ def create_book(
     # 1. 判重（jmcomic:<id>）——在打包前，省掉无用 IO。
     #    new_api(Cache) 没有 get_book_id_from_identifier（那是旧版 legacy API），
     #    用 identifiers 精确搜索（"=" 前缀）代替。
-    matches = db_api.search(f'identifiers:"=jmcomic:{album_id}"')
+    matches = db.new_api.search(f'identifiers:"=jmcomic:{album_id}"')
     if matches:
         return {
             "status": "skipped",
@@ -108,9 +110,8 @@ def create_book(
     if cover_data:
         mi.cover_data = (cover_ext, cover_data)
 
-    # 4. 入库
-    with open(cbz_path, "rb") as cbz_stream:
-        ids, _dups = db_api.add_books([(mi, {"CBZ": cbz_stream})])
+    # 4. 入库（legacy 层：同步 GUI 数据缓存，视图即时可见）
+    ids = db.add_books([cbz_path], ["CBZ"], [mi], return_ids=True)
     if not ids:
         result["message"] = "add_books 未返回书 id"
         return result

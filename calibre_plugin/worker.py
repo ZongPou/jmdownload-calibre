@@ -29,12 +29,12 @@ class DownloadWorker(QThread):
     event = pyqtSignal(object)
 
     def __init__(
-        self, album_ids: list[str], python_cmd: list[str], db_api, parent=None
+        self, album_ids: list[str], python_cmd: list[str], db, parent=None
     ):
         super().__init__(parent)
         self.album_ids = list(album_ids)
         self.python_cmd = list(python_cmd)
-        self.db_api = db_api
+        self.db = db
         self._proc: subprocess.Popen | None = None
         self._cancelled = False
         self._meta: dict[str, dict] = {}
@@ -165,7 +165,7 @@ class DownloadWorker(QThread):
                 album_id,
                 downloaded_dir or out_dir,
                 meta,
-                self.db_api,
+                self.db,
                 prefs["web_domain"],
             )
         except Exception as exc:
