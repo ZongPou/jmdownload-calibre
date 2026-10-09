@@ -7,7 +7,7 @@
 
 from calibre.customize import InterfaceActionBase
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 class Jmcomic2CalibrePlugin(InterfaceActionBase):
@@ -18,6 +18,6 @@ class Jmcomic2CalibrePlugin(InterfaceActionBase):
     )
     supported_platforms = ["windows", "osx", "linux"]
     author = "ZongPou"
-    version = (0, 1, 0)
+    version = (0, 2, 0)
     minimum_calibre_version = (7, 0, 0)
     actual_plugin = "calibre_plugins.jmcomic2calibre.ui:InterfacePlugin"

@@ -206,9 +206,10 @@ class DownloadDialog(QDialog):
         if skipped:
             parts.append("跳过（已在书库）：%s" % "、".join(skipped))
         if failed:
-            parts.append(
-                "失败 %d 本：%s" % (len(failed), "；".join(sorted(failed)))
+            detail = "；".join(
+                "%s: %s" % (k, v) for k, v in sorted(failed.items())
             )
+            parts.append("失败 %d 本：%s" % (len(failed), detail))
         self.status_label.setText("；".join(parts) or "无任务")
         if ok:
             # add_books 直写数据库，GUI 视图需要手动触发刷新
