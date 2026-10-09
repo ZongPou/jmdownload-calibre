@@ -1,7 +1,7 @@
-"""下载对话框：ID/链接输入、实时解析预览、环境探测、下载进度。
+"""下载对话框：ID/链接输入、实时解析预览、环境探测、下载进度与日志。
 
 下载走 worker.DownloadWorker（子进程桥调用系统 Python 的 jmcomic），
-本类只负责 UI 状态机与事件展示。
+本类只负责 UI 状态机、事件展示与会话日志（一键复制，供排障反馈）。
 进度条双模式：拿到总页数（meta.total_images）后为百分比模式，否则 busy。
 
 线程生命周期（防闪退）：worker 无 Qt parent；finished 同时连接
@@ -9,13 +9,17 @@ on_worker_finished（UI 复位）与 deleteLater（Qt 事件循环安全删除�
 结束后 Python 引用保留在 self._worker，直到下次下载覆盖。
 """
 
+from datetime import datetime
+
 from qt.core import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QTimer,
     QVBoxLayout,
     pyqtSignal,
     QThread,
@@ -23,6 +27,8 @@ from qt.core import (
 
 from calibre_plugins.jmcomic2calibre.common import describe_probe, parse_album_ids
 from calibre_plugins.jmcomic2calibre.config import prefs
+
+LOG_MAX_LINES = 3000  # 日志缓冲上限（超出丢弃最旧的）
 
 
 class ProbeThread(QThread):
@@ -52,6 +58,7 @@ class DownloadDialog(QDialog):
         self._python_cmd = None  # doctor 探测到的解释器命令
         self._album_start_text = ""
         self._total_images = 0  # 当前本的预期图片总数（meta 事件带来）
+        self._log_lines = []  # 会话日志（带时间戳，供一键复制）
 
         self.setWindowTitle("JMComic 下载")
         self.setMinimumWidth(520)
@@ -83,6 +90,12 @@ class DownloadDialog(QDialog):
         self.reprobe_button = QPushButton("重新检测环境")
         self.reprobe_button.clicked.connect(self.start_probe)
         buttons.addWidget(self.reprobe_button)
+        self.copy_log_button = QPushButton("复制日志")
+        self.copy_log_button.setToolTip(
+            "复制本次会话的操作日志到剪贴板（报障时请粘贴给开发者）"
+        )
+        self.copy_log_button.clicked.connect(self.copy_log)
+        buttons.addWidget(self.copy_log_button)
         buttons.addStretch(1)
         self.download_button = QPushButton("开始下载")
         self.download_button.setEnabled(False)
@@ -93,7 +106,41 @@ class DownloadDialog(QDialog):
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
 
+        self._log("对话框已打开（插件 v%s）" % self._version_text())
         self.start_probe()
+
+    # ---- 日志 ----
+
+    def _version_text(self) -> str:
+        version = getattr(self.plugin, "version", None) or (0, 0, 0)
+        return ".".join(str(x) for x in version)
+
+    def _log(self, message: str) -> None:
+        """追加一行会话日志（多行消息按行拆分），超出上限丢弃最旧的。"""
+        stamp = datetime.now().strftime("%H:%M:%S")
+        for line in str(message).splitlines() or [""]:
+            self._log_lines.append("[%s] %s" % (stamp, line))
+        if len(self._log_lines) > LOG_MAX_LINES:
+            del self._log_lines[:-LOG_MAX_LINES]
+
+    def copy_log(self):
+        """把会话日志（含环境头信息）复制到剪贴板。"""
+        try:
+            from calibre.constants import __version__ as calibre_version
+        except Exception:
+            calibre_version = "未知"
+        header = [
+            "JMComic Downloader 日志",
+            "插件版本: %s | calibre 版本: %s" % (self._version_text(), calibre_version),
+            "系统: Windows | 导出时间: %s"
+            % datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "-" * 48,
+        ]
+        body = self._log_lines or ["（本次会话暂无日志）"]
+        QApplication.clipboard().setText("\n".join(header + body))
+        self._log("日志已复制到剪贴板（%d 行）" % len(body))
+        self.copy_log_button.setText("已复制 ✓")
+        QTimer.singleShot(1500, lambda: self.copy_log_button.setText("复制日志"))
 
     # ---- 环境探测 ----
 
@@ -106,7 +153,9 @@ class DownloadDialog(QDialog):
         self._probe.start()
 
     def on_probe_done(self, result):
-        self.status_label.setText(describe_probe(result))
+        text = describe_probe(result)
+        self.status_label.setText(text)
+        self._log(text)
         if result and result.get("ok") and result.get("cmd"):
             self._python_cmd = list(result["cmd"])
         self._probe = None
@@ -133,6 +182,7 @@ class DownloadDialog(QDialog):
             self._worker.cancel()
             self.download_button.setEnabled(False)
             self.status_label.setText("正在取消…")
+            self._log("用户请求取消下载")
             return
         ids, _errors = parse_album_ids(self.input_edit.toPlainText())
         if not ids:
@@ -157,6 +207,14 @@ class DownloadDialog(QDialog):
         self.status_label.setText("正在启动下载引擎…")
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(True)
+        self._log(
+            "启动下载：%s（解释器: %s，临时目录: %s）"
+            % (
+                "、".join(ids),
+                " ".join(self._python_cmd),
+                prefs["work_dir"] or "系统默认",
+            )
+        )
         self._worker.start()
 
     def set_downloading_ui(self, downloading: bool):
@@ -181,6 +239,15 @@ class DownloadDialog(QDialog):
             self._album_start_text = "正在下载 %s …" % head
             self.status_label.setText(self._album_start_text)
             self._total_images = int(ev.get("total_images") or 0)
+            self._log(
+                "元数据：《%s》 作者: %s 标签: %s 总页数: %s"
+                % (
+                    title,
+                    authors or "未知",
+                    "、".join(ev.get("tags") or []) or "无",
+                    self._total_images or "未知",
+                )
+            )
             if self._total_images > 0:
                 self.progress_bar.setRange(0, 100)
                 self.progress_bar.setValue(0)
@@ -202,10 +269,17 @@ class DownloadDialog(QDialog):
                     "%s 已下载 %d 张图片" % (self._album_start_text, n)
                 )
         elif kind == "log":
-            pass  # 噪音输出，忽略
+            # jmcomic 噪音输出 / worker 调试信息：记入日志（不进状态行）
+            for line in str(ev.get("message", "")).splitlines():
+                if line.strip():
+                    self._log(line)
         elif kind == "downloaded":
             self.status_label.setText(
                 "%s 下载完成：%s 张图片" % (self._album_start_text, ev.get("images", "?"))
+            )
+            self._log(
+                "下载完成：%s 张图片（目录: %s）"
+                % (ev.get("images", "?"), ev.get("dir", "?"))
             )
             if self._total_images > 0:
                 self.progress_bar.setValue(100)
@@ -214,9 +288,14 @@ class DownloadDialog(QDialog):
         elif kind == "ingesting":
             self._album_start_text = "正在打包入库《%s》…" % ev.get("title", "")
             self.status_label.setText(self._album_start_text)
+            self._log("开始打包 CBZ 并入库…")
         elif kind == "ingested":
             self.status_label.setText(
                 "已入库：《%s》→ 书号 %s（metadata.opf 已同步生成）"
+                % (ev.get("title", ev.get("album_id")), ev.get("book_id"))
+            )
+            self._log(
+                "已入库：《%s》→ 书号 %s"
                 % (ev.get("title", ev.get("album_id")), ev.get("book_id"))
             )
         elif kind == "skipped":
@@ -224,8 +303,17 @@ class DownloadDialog(QDialog):
                 "已在书库，跳过：%s（书号 %s）"
                 % (ev.get("album_id"), ev.get("book_id"))
             )
+            self._log(
+                "判重命中，跳过：%s（书号 %s）"
+                % (ev.get("album_id"), ev.get("book_id"))
+            )
         elif kind == "error":
-            self.status_label.setText("错误：%s" % ev.get("message", ""))
+            message = ev.get("message", "")
+            self.status_label.setText("错误：%s" % message)
+            self._log("错误：%s" % message)
+            tb = ev.get("traceback")
+            if tb:
+                self._log(tb)  # bridge 的完整堆栈（排障关键）
         elif kind == "all_done":
             self.report_all_done(ev)
 
@@ -245,7 +333,9 @@ class DownloadDialog(QDialog):
                 "%s: %s" % (k, v) for k, v in sorted(failed.items())
             )
             parts.append("失败 %d 本：%s" % (len(failed), detail))
-        self.status_label.setText("；".join(parts) or "无任务")
+        summary = "；".join(parts) or "无任务"
+        self.status_label.setText(summary)
+        self._log("全部结束：%s" % summary)
         if ok:
             # legacy add_books 会同步 GUI 数据缓存，但视图仍需手动触发重载；
             # 各步骤独立容错，避免单点异常中断整条刷新链

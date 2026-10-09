@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import traceback
 import tempfile
 
 from qt.core import QThread, pyqtSignal
@@ -169,6 +170,10 @@ class DownloadWorker(QThread):
                 prefs["web_domain"],
             )
         except Exception as exc:
+            self.event.emit({
+                "event": "log",
+                "message": "入库失败堆栈:\n" + traceback.format_exc(),
+            })
             self.failed[album_id] = f"入库失败: {exc}"
             return False
 
