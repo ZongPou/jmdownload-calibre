@@ -28,11 +28,13 @@ except ImportError:
     sys.modules.setdefault("calibre.customize", _fake_customize)
 
 from build_plugin import build, collect_files, read_version
+from calibre_plugin.bridge import parse_args
 from calibre_plugin.common import (
     DEFAULTS,
     describe_probe,
     doctor,
     parse_album_ids,
+    parse_event_line,
     parse_probe_output,
     probe_interpreter,
     python_candidates,
@@ -217,6 +219,8 @@ class TestBuildPlugin(unittest.TestCase):
         names = {f.name for f in collect_files()}
         self.assertIn("__init__.py", names)
         self.assertIn("plugin-import-name-jmcomic2calibre.txt", names)
+        self.assertIn("bridge.py", names)
+        self.assertIn("worker.py", names)
         self.assertNotIn("common.pyc", names)
 
     def test_build_zip_structure(self):
@@ -228,7 +232,56 @@ class TestBuildPlugin(unittest.TestCase):
             self.assertIn("__init__.py", names)
             self.assertIn("plugin-import-name-jmcomic2calibre.txt", names)
             self.assertIn("images/icon.png", names)
+            self.assertIn("bridge.py", names)
             self.assertTrue(all(not n.startswith("__pycache__") for n in names))
+
+
+class TestBridgeArgs(unittest.TestCase):
+    def test_minimal(self):
+        args = parse_args(["--album-id", "350234", "--out-dir", "D:/tmp/x"])
+        self.assertEqual("350234", args.album_id)
+        self.assertEqual("D:/tmp/x", args.out_dir)
+        self.assertEqual("", args.proxy)
+
+    def test_with_proxy(self):
+        args = parse_args(
+            ["--album-id", "1", "--out-dir", "x", "--proxy", "http://127.0.0.1:7890"]
+        )
+        self.assertEqual("http://127.0.0.1:7890", args.proxy)
+
+    def test_missing_required(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--album-id", "1"])
+
+
+class TestParseEventLine(unittest.TestCase):
+    def test_valid_events(self):
+        ev = parse_event_line('{"event": "progress", "images": 5}')
+        self.assertEqual({"event": "progress", "images": 5}, ev)
+
+    def test_meta_with_unicode(self):
+        ev = parse_event_line('{"event": "meta", "title": "某本子"}')
+        self.assertEqual("某本子", ev["title"])
+
+    def test_noise_becomes_log(self):
+        ev = parse_event_line("JMComic INFO: downloading page 3")
+        self.assertEqual("log", ev["event"])
+        self.assertIn("downloading", ev["message"])
+
+    def test_blank_line(self):
+        self.assertIsNone(parse_event_line("   "))
+
+    def test_broken_json_becomes_log(self):
+        ev = parse_event_line('{"event": "meta", "title": ')
+        self.assertEqual("log", ev["event"])
+
+    def test_json_without_event_becomes_log(self):
+        ev = parse_event_line('{"foo": 1}')
+        self.assertEqual("log", ev["event"])
+
+    def test_non_dict_json_becomes_log(self):
+        ev = parse_event_line("[1, 2, 3]")
+        self.assertEqual("log", ev["event"])
 
 
 if __name__ == "__main__":

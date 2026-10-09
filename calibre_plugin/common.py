@@ -170,3 +170,26 @@ def describe_probe(result: dict) -> str:
     error = result.get("error", "未知原因")
     cmd = " ".join(result.get("cmd") or []) or "未找到解释器"
     return f"环境异常：{error}（{cmd}）"
+
+
+# ---------- 桥接事件流解析 ----------
+
+
+def parse_event_line(line: str) -> dict | None:
+    """把 bridge 输出的一行文本解析成事件 dict。
+
+    合法 JSON 行 → 事件（必须含字符串 event 字段，否则视为日志）；
+    非 JSON 行（jmcomic/第三方库的杂音输出）→ {"event": "log", ...}；
+    空行 → None。
+    """
+    text = (line or "").strip()
+    if not text:
+        return None
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("event"), str):
+            return data
+    return {"event": "log", "message": text}

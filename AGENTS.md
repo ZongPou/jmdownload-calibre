@@ -49,7 +49,10 @@
        ID 输入对话框、JSONConfig（python_path/域名/代理/格式）、doctor 环境探测、构建 zip 脚本
        （2026-10-10 完成；纯逻辑集中在 common.py 供离线单测；`python build_plugin.py` 出
        dist/jmcomic2calibre-v0.1.0.zip；`python -m unittest tests.test_plugin` 27 项全过）
-2. [ ] 子进程下载桥：调用系统 Python 跑下载 + 元数据采集，stdout JSON-lines 事件协议（进度/结果/错误）
+2. [x] 子进程下载桥：调用系统 Python 跑下载 + 元数据采集，stdout JSON-lines 事件协议（进度/结果/错误）
+       （2026-10-10 完成；`calibre_plugin/bridge.py` 由系统 Python 执行、进度为轮询统计图片数、
+       stdout 仅 JSON 行；`worker.py` 负责提取 bridge/子进程管理/取消；对话框接入 busy 进度条与
+       下载/取消切换；事件行解析 parse_event_line 在 common.py 供离线单测）
 3. [ ] 入库：CBZ 打包（含 ComicInfo.xml）+ add_books（判重跳过/双标识符/封面）
 4. [ ] 批量 ID、进度对话框、取消、错误处理、配置界面完善
 5. [ ] 发布：构建产物 zip 不进 git，GitHub Release 由用户发布
