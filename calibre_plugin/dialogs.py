@@ -214,7 +214,7 @@ class DownloadDialog(QDialog):
         if ok:
             # add_books 直写数据库，GUI 视图需要手动触发刷新
             try:
-                self.gui.library_view.model().books_added()
+                self.gui.library_view.model().books_added(len(ok))
                 self.gui.refresh_cover_browser()
                 self.gui.tags_view.recount()
             except Exception:
