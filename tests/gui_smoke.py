@@ -23,7 +23,7 @@ sys.modules[config.__name__] = config
 
 from qt.core import QApplication, QDialog, QListWidgetItem, Qt
 from calibre_plugins.jmcomic2calibre.dialogs import DownloadDialog, ChapterDialog
-from calibre_plugins.jmcomic2calibre.worker import DownloadWorker, PrepareWorker, CoverWorker
+from calibre_plugins.jmcomic2calibre.worker import DownloadWorker, PrepareWorker
 from calibre_plugins.jmcomic2calibre.config_widget import ConfigWidget
 APP = QApplication.instance() or QApplication([])
 
@@ -38,7 +38,6 @@ class GuiTests(unittest.TestCase):
         config.prefs.update(DEFAULTS)
         self.patches = [patch.object(DownloadDialog, "start_probe"),
                         patch.object(DownloadDialog, "_start_prepare"),
-                        patch.object(DownloadDialog, "_start_cover_jobs"),
                         patch.object(DownloadDialog, "_start_next")]
         for p in self.patches:
             p.start()
@@ -115,70 +114,21 @@ class GuiTests(unittest.TestCase):
             self.dialog._choose_next()
             execute.assert_called_once()
 
-    def test_cover_event_uses_actual_qpixmap(self):
-        from qt.core import QPixmap, QBuffer, QByteArray, QIODevice
-        import base64
-        t = self.task(3)
-        t["state"] = "读取章节中"
-        pixmap = QPixmap(20, 30)
-        pixmap.fill(Qt.GlobalColor.blue)
-        data = QByteArray()
-        buf = QBuffer(data)
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        pixmap.save(buf, "PNG")
-        self.dialog._on_prepared({"event": "prepared", "album_id": "123", "meta": metadata(3),
-                                 "cover": base64.b64encode(bytes(data)).decode()})
-        self.assertFalse(t["cover"].isNull())
-        self.assertFalse(t["row"].cover.pixmap().isNull())
-
-    def cover_event(self, width=120, height=240):
-        from qt.core import QPixmap, QBuffer, QByteArray, QIODevice
-        import base64
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.GlobalColor.green)
-        data = QByteArray()
-        buf = QBuffer(data)
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        pixmap.save(buf, "PNG")
-        return {"event": "cover_ready", "album_id": "123", "cover": base64.b64encode(bytes(data)).decode()}
-
-    def test_chapters_are_selectable_before_cover_and_cover_does_not_reset_download(self):
-        task = self.task(12)
-        task["state"] = "读取章节中"
-        self.dialog._on_prepared({"event": "prepared", "album_id": "123", "meta": metadata(12)})
-        self.assertEqual("待选择章节", task["state"])
-        self.assertNotIn("cover", task)
-        def execute(d):
-            d.range_edit.setText("1-10")
-            d.apply_range()
-            return QDialog.DialogCode.Accepted
-        with patch.object(ChapterDialog, "exec", execute):
-            self.dialog._choose_next()
-        task["state"] = "下载中"
-        selected = list(task["selected"])
-        self.dialog._on_cover_event(self.cover_event(), task)
-        self.assertEqual("下载中", task["state"])
-        self.assertEqual(selected, task["selected"])
-        self.assertEqual("ready", task["cover_state"])
-        # 1:2 原图缩放到 34x68，保持原比例，完整显示，不裁切或拉伸成方形。
-        shown = task["row"].cover.pixmap()
-        self.assertEqual((34, 68), (shown.width(), shown.height()))
-
-    def test_late_cover_for_removed_task_does_not_touch_readded_same_id(self):
-        old = self.task(4)
-        old["row"].remove_button.click()
-        new = self.task(4)
-        self.dialog._on_cover_event(self.cover_event(), old)
-        self.assertNotIn("cover", old)
-        self.assertNotIn("cover", new)
-        self.assertEqual(1, self.dialog.queue_list.count())
-
-    def test_cover_failure_keeps_task_downloadable(self):
+    def test_prepared_chapters_do_not_start_cover_process_and_keep_row_layout(self):
         task = self.task(2)
-        self.dialog._apply_selection(task, ["101", "102"])
-        self.dialog._on_cover_event({"event": "cover_error", "message": "模拟超时"}, task)
+        task["state"] = "读取章节中"
+        with patch("calibre_plugins.jmcomic2calibre.worker.subprocess.Popen") as popen:
+            self.dialog._on_prepared({"event": "prepared", "album_id": "123", "meta": metadata(2)})
+            self.dialog._choose_next()
+            popen.assert_not_called()
         self.assertEqual("等待中", task["state"])
-        self.assertEqual("failed", task["cover_state"])
+        self.assertEqual(["101", "102"], task["selected"])
+        self.assertEqual((48, 68), (task["row"].cover.width(), task["row"].cover.height()))
+
+
+
+
+
 
     def test_cancel_only_current_and_waits_for_finished(self):
         task = self.task(4)
@@ -309,26 +259,6 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual("prepared", received[0]["event"])
         self.assertNotIn("cover", received[0])
 
-    def test_cover_worker_reads_cover_independently(self):
-        import base64
-        worker = CoverWorker(["123"], ["python"], None)
-        received = []
-        worker.message_received.connect(received.append)
-        def spawn(cmd, **kwargs):
-            self.assertIn("--cover-only", cmd)
-            self.assertNotIn("--meta-only", cmd)
-            Path(cmd[cmd.index("--cover-path") + 1]).write_bytes(b"portrait image")
-            proc = Mock(returncode=0)
-            proc.communicate.return_value = ('{"event":"cover"}\n', None)
-            return proc
-        with tempfile.TemporaryDirectory() as tmp:
-            bridge = Path(tmp) / "bridge.py"
-            bridge.touch()
-            worker._extract_bridge = Mock(return_value=str(bridge))
-            with patch("calibre_plugins.jmcomic2calibre.worker.subprocess.Popen", side_effect=spawn):
-                worker.run()
-        self.assertEqual("cover_ready", received[0]["event"])
-        self.assertEqual(b"portrait image", base64.b64decode(received[0]["cover"]))
 
     def test_cancel_removes_partial_folder_without_downloaded_event(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,7 +317,7 @@ class PipelineTests(unittest.TestCase):
                 path = Path(tmp) / (worker.album_ids[0] + ".py")
                 path.touch()
                 return str(path)
-            with patch.object(DownloadDialog, "start_probe"), patch.object(DownloadDialog, "_start_prepare"), patch.object(DownloadDialog, "_start_cover_jobs"), patch.object(DownloadWorker, "_extract_bridge", bridge), patch.object(DownloadWorker, "_run_one", run_one):
+            with patch.object(DownloadDialog, "start_probe"), patch.object(DownloadDialog, "_start_prepare"), patch.object(DownloadWorker, "_extract_bridge", bridge), patch.object(DownloadWorker, "_run_one", run_one):
                 dialog = DownloadDialog(None, types.SimpleNamespace(gui=Mock(), version=(0, 3, 0), show_config=Mock()))
                 dialog._python_cmd = ["python"]
                 try:
@@ -459,72 +389,10 @@ class IngestTests(unittest.TestCase):
             self.assertEqual("skipped", result["status"])
 
 
-class CoverPipelineTests(unittest.TestCase):
-    def test_slow_cover_threads_do_not_block_chapter_selection_or_downloads(self):
-        import threading
-        import time
-        config.prefs.update(DEFAULTS)
-        gate = threading.Event()
-        both_started = threading.Event()
-        lock = threading.Lock()
-        started, downloads = [], []
-        cover_event = GuiTests.cover_event(self)
-        def cover_run(worker):
-            with lock:
-                started.append(worker.album_ids[0])
-                if len(started) == 2:
-                    both_started.set()
-            gate.wait(3)
-            if not worker._cancelled:
-                worker.message_received.emit({**cover_event, "album_id": worker.album_ids[0]})
-        def download(worker, album_id, bridge_path):
-            downloads.append(album_id)
-            worker.ok_ids.append(album_id)
-        with tempfile.TemporaryDirectory() as tmp:
-            def bridge(worker):
-                path = Path(tmp) / (worker.album_ids[0] + ".py")
-                path.touch()
-                return str(path)
-            with patch.object(DownloadDialog, "start_probe"), patch.object(DownloadDialog, "_start_prepare"), patch.object(CoverWorker, "run", cover_run), patch.object(DownloadWorker, "_run_one", download), patch.object(DownloadWorker, "_extract_bridge", bridge):
-                d = DownloadDialog(None, types.SimpleNamespace(gui=Mock(), version=(0, 3, 4)))
-                d._python_cmd = ["python"]
-                try:
-                    for album_id in ("123", "456"):
-                        d.input_edit.setPlainText(album_id)
-                        d.on_download_clicked()
-                        task = d._tasks[-1]
-                        task["state"] = "读取章节中"
-                        meta = metadata(2)
-                        meta["album_id"] = album_id
-                        d._on_prepared({"event": "prepared", "album_id": album_id, "meta": meta})
-                        d._choose_next()
-                    self.assertTrue(both_started.wait(2))
-                    deadline = time.monotonic() + 2
-                    while time.monotonic() < deadline and (len(downloads) < 2 or d._downloading):
-                        APP.processEvents()
-                        time.sleep(0.005)
-                    self.assertEqual(["123", "456"], downloads)
-                    self.assertTrue(all(t["cover_state"] == "loading" for t in d._tasks))
-                    gate.set()
-                    deadline = time.monotonic() + 2
-                    while time.monotonic() < deadline and any(s["busy"] for s in d._cover_slots):
-                        APP.processEvents()
-                        time.sleep(0.005)
-                    self.assertTrue(all(t["cover_state"] == "ready" for t in d._tasks))
-                    self.assertEqual(["完成", "完成"], [t["state"] for t in d._tasks])
-                finally:
-                    gate.set()
-                    d._closing = True
-                    for slot in d._cover_slots:
-                        if slot["busy"]:
-                            slot["worker"].wait(3000)
-                    if d._downloading:
-                        d._worker.wait(3000)
-                    APP.processEvents()
 
 
 suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(cls)
-                           for cls in (GuiTests, WorkerTests, PipelineTests, IngestTests, CoverPipelineTests))
+                           for cls in (GuiTests, WorkerTests, PipelineTests, IngestTests))
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 if not result.wasSuccessful():
     raise SystemExit(1)

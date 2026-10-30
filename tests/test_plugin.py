@@ -161,16 +161,15 @@ class TestParseAlbumIds(unittest.TestCase):
 
 
 class TestChapterSelection(unittest.TestCase):
-    def test_cover_only_uses_portrait_without_requesting_album_or_chapters(self):
+    def test_chapter_preview_only_requests_album_detail(self):
         from calibre_plugin.bridge import fetch_meta_and_download
         fake, client = self._fake_jm()
         with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit") as emit:
-            path = os.path.join(tmp, "cover.jpg")
-            fetch_meta_and_download("123", tmp, "", cover_path=path, cover_only=True)
-            client.download_album_cover.assert_called_once_with("123", path, size="_3x4")
-            client.get_album_detail.assert_not_called()
+            fetch_meta_and_download("123", tmp, "", meta_only=True)
+            client.download_album_cover.assert_not_called()
+            client.get_album_detail.assert_called_once_with("123")
             client.get_photo_detail.assert_not_called()
-            self.assertEqual("cover", emit.call_args.args[0]["event"])
+            self.assertEqual(3, len(emit.call_args_list[0].args[0]["chapters"]))
 
     def test_download_naming_keeps_title_and_exact_chapter_selection(self):
         from calibre_plugin.common import download_title
@@ -237,6 +236,7 @@ class TestChapterSelection(unittest.TestCase):
             self.assertEqual(["900", "300"], [c.args[0].photo_id for c in fake.downloader.download_by_photo_detail.call_args_list])
             fake.download_album.assert_not_called()
             images = collect_images(tmp)
+            fake.JmOption.default().build_jm_client().download_album_cover.assert_not_called()
             self.assertEqual([b"900", b"900", b"300", b"300"], [Path(p).read_bytes() for p in images])
             events = [c.args[0] for c in emit.call_args_list]
             self.assertEqual(0, next(e for e in events if e["event"] == "meta")["total_images"])
@@ -264,12 +264,13 @@ class TestChapterSelection(unittest.TestCase):
                 fetch_meta_and_download("123", tmp, "", chapter_ids=["999"])
             fake.download_photo.assert_not_called()
 
-    def test_preview_cover_failure_does_not_block_chapter_selection(self):
+    def test_preview_never_contacts_cover_service(self):
         from calibre_plugin.bridge import fetch_meta_and_download
         fake, client = self._fake_jm()
         client.download_album_cover.side_effect = RuntimeError("离线封面失败")
         with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit") as emit:
-            fetch_meta_and_download("123", tmp, "", True, cover_path=os.path.join(tmp, "cover.jpg"))
+            fetch_meta_and_download("123", tmp, "", True)
+            client.download_album_cover.assert_not_called()
             self.assertEqual(3, emit.call_args_list[0].args[0]["chapters"].__len__())
             fake.download_photo.assert_not_called()
             fake.download_album.assert_not_called()
@@ -450,7 +451,7 @@ class TestConfigDefaults(unittest.TestCase):
 
 class TestBuildPlugin(unittest.TestCase):
     def test_read_version(self):
-        self.assertEqual("0.3.4", read_version())
+        self.assertEqual("0.3.5", read_version())
 
     def test_collect_files_excludes_cache(self):
         names = {f.name for f in collect_files()}
