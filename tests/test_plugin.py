@@ -11,6 +11,7 @@ import types
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 # ---- 离线 stub：无 calibre 的机器上，给 calibre_plugin 包一个可导入的基类 ----
 # 产品代码保持官方插件结构；stub 只存在于测试进程。
@@ -50,6 +51,40 @@ from calibre_plugin.packaging import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+class TestDownloadConcurrency(unittest.TestCase):
+    def test_large_album_is_bounded_and_failure_never_reports_downloaded(self):
+        from calibre_plugin.bridge import fetch_meta_and_download
+
+        option = types.SimpleNamespace(
+            dir_rule=types.SimpleNamespace(base_dir=""),
+            download=types.SimpleNamespace(threading=types.SimpleNamespace(
+                photo=32, image=30)),
+            new_jm_client=Mock(return_value=types.SimpleNamespace(
+                get_album_detail=Mock(return_value=types.SimpleNamespace(
+                    page_count=5000)))),
+        )
+
+        def download(album_id, actual_option):
+            self.assertEqual("364522", album_id)
+            self.assertEqual(1, actual_option.download.threading.photo)
+            self.assertEqual(4, actual_option.download.threading.image)
+            raise RuntimeError("部分下载失败")
+
+        fake = types.SimpleNamespace(
+            JmOption=types.SimpleNamespace(default=lambda: option),
+            download_album=download,
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            sys.modules, {"jmcomic": fake}
+        ), patch("calibre_plugin.bridge.emit") as emit:
+            with self.assertRaisesRegex(RuntimeError, "部分下载失败"):
+                fetch_meta_and_download("364522", tmp, "")
+            self.assertFalse(any(
+                call.args[0]["event"] == "downloaded"
+                for call in emit.call_args_list
+            ))
 
 
 class TestParseAlbumIds(unittest.TestCase):
@@ -222,7 +257,7 @@ class TestConfigDefaults(unittest.TestCase):
 
 class TestBuildPlugin(unittest.TestCase):
     def test_read_version(self):
-        self.assertEqual("0.2.7", read_version())
+        self.assertEqual("0.2.8", read_version())
 
     def test_collect_files_excludes_cache(self):
         names = {f.name for f in collect_files()}

@@ -7,7 +7,9 @@
 把上游 CLI 工具（jmcomic-calibre，`jmcal` 命令）改造为 **Calibre GUI 插件**：
 输入禁漫漫画 ID → 自动下载 → 打包 CBZ（内嵌 ComicInfo.xml）→ 带元数据直接入库 Calibre。
 
-**当前状态：v0.2.7，阶段 1-4 全部完成并通过用户验收，处于阶段 5（发布）**。
+**当前状态：v0.2.8 本地修复候选版；v0.2.7 阶段 1-4 已验收，处于阶段 5（发布）**。
+- 2026-10-31：日志中漫画 364522 有 314 张图片 SSL 中断/超时后失败。bridge 固定章节并发 1、图片并发 4，避免上游默认 30 × CPU 核心数放大连接；仍需用户真实站点验证，不能认定站点限流或网络问题已解决。
+- 新构建：`dist/jmdownload-calibre-v0.2.8.zip`；离线测试 46 项（含大合集并发限制及失败不报下载完成）。旧发布简报只适用于 v0.2.7。
 - 发布物：`dist/jmdownload-calibre-v0.2.7.zip`（构建产物）
 - 本地 main 领先 origin/main **25 个提交**（未推送）
 - 测试：`python -m unittest tests.test_plugin`，45 项全过（离线，不碰网络）

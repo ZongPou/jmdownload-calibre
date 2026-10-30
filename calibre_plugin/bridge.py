@@ -84,6 +84,10 @@ def fetch_meta_and_download(
     os.makedirs(out_dir, exist_ok=True)
     option = jmcomic.JmOption.default()
     option.dir_rule.base_dir = out_dir
+    # 上游默认每章 30 张图片、章节并发随 CPU 核心数增长。
+    # 大合集会放大连接数，固定双层上限以降低超时及连接中断风险。
+    option.download.threading.photo = 1
+    option.download.threading.image = 4
     if proxy:
         os.environ.setdefault("HTTP_PROXY", proxy)
         os.environ.setdefault("HTTPS_PROXY", proxy)
@@ -112,6 +116,8 @@ def fetch_meta_and_download(
         emit({"event": "log", "message": "--meta-only 跳过下载"})
         emit({"event": "downloaded", "dir": out_dir, "images": 0})
         return
+
+    emit({"event": "log", "message": "下载并发：1 章 / 4 张图片"})
 
     # 进度轮询线程：统计已落地的图片文件数（不依赖 jmcomic 内部回调 API）
     stop = threading.Event()
