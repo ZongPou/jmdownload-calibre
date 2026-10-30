@@ -26,6 +26,7 @@ import os
 import sys
 import threading
 import traceback
+import re
 
 
 def _isolate_script_dir() -> None:
@@ -57,6 +58,8 @@ def parse_args(argv=None):
     parser.add_argument("--album-id", required=True, help="漫画 ID")
     parser.add_argument("--out-dir", required=True, help="图片输出目录")
     parser.add_argument("--proxy", default="", help="代理地址（可选）")
+    parser.add_argument("--chapters", default="", help="选中的章节 ID，以逗号分隔")
+    parser.add_argument("--cover-path", default="", help="预览封面的独立存储路径")
     parser.add_argument(
         "--meta-only",
         action="store_true",
@@ -77,7 +80,8 @@ def count_images(out_dir: str) -> int:
 
 
 def fetch_meta_and_download(
-    album_id: str, out_dir: str, proxy: str, meta_only: bool = False
+    album_id: str, out_dir: str, proxy: str, meta_only: bool = False,
+    chapter_ids: list[str] | None = None, cover_path: str = "",
 ) -> None:
     import jmcomic  # 系统环境里的 jmcomic
 
@@ -98,7 +102,16 @@ def fetch_meta_and_download(
 
     client = option.new_jm_client()
     album = client.get_album_detail(str(album_id))
+    episodes = getattr(album, "episode_list", None) or [(str(album_id), "1", getattr(album, "name", str(album_id)))]
+    chapters = [{"id": str(e[0]), "number": i, "title": str(e[2])}
+                for i, e in enumerate(episodes, 1)]
+    selected = set(chapter_ids or [])
+    if selected and not selected.issubset({c["id"] for c in chapters}):
+        raise ValueError("章节列表已变化，请重新添加漫画并选择章节")
     total_images = int(getattr(album, "page_count", 0) or 0)
+    if selected and selected != {c["id"] for c in chapters}:
+        # 整本 page_count 不能用作部分章节的分母；由所选章节详情汇总。
+        total_images = sum(len(client.get_photo_detail(c["id"])) for c in chapters if c["id"] in selected)
     emit(
         {
             "event": "meta",
@@ -109,10 +122,17 @@ def fetch_meta_and_download(
             "description": str(getattr(album, "description", "") or ""),
             "published": str(getattr(album, "pub_date", "") or ""),
             "total_images": total_images,
+            "chapters": chapters,
         }
     )
 
     if meta_only:
+        if cover_path:
+            try:
+                client.download_album_cover(str(album_id), cover_path)
+                emit({"event": "cover", "path": cover_path})
+            except Exception as exc:
+                emit({"event": "log", "message": "封面预览获取失败（不影响下载）: " + str(exc)})
         emit({"event": "log", "message": "--meta-only 跳过下载"})
         emit({"event": "downloaded", "dir": out_dir, "images": 0})
         return
@@ -138,7 +158,27 @@ def fetch_meta_and_download(
     watcher = threading.Thread(target=progress_loop, daemon=True)
     watcher.start()
     try:
-        jmcomic.download_album(str(album_id), option)
+        if selected:
+            # 顺序下载，固定序号目录保证 CBZ 章节次序；不能按 photo ID 排序。
+            for chapter in chapters:
+                if chapter["id"] not in selected:
+                    continue
+                chapter_dir = os.path.join(out_dir, "%05d" % chapter["number"])
+                os.makedirs(chapter_dir, exist_ok=True)
+                option.dir_rule.base_dir = chapter_dir
+                jmcomic.download_photo(chapter["id"], option)
+                images = [os.path.join(root, name)
+                          for root, _, files in os.walk(chapter_dir) for name in files
+                          if os.path.splitext(name)[1].lower() in IMAGE_EXTS]
+                images.sort(key=lambda path: [(0, int(p)) if p.isdigit() else (1, p)
+                            for p in re.split(r"(\d+)", os.path.basename(path).lower())])
+                if not images:
+                    raise RuntimeError("章节 %s 没有下载到图片" % chapter["number"])
+                for page, path in enumerate(images, 1):
+                    os.replace(path, os.path.join(out_dir, "%05d_%05d%s" % (
+                        chapter["number"], page, os.path.splitext(path)[1])))
+        else:
+            jmcomic.download_album(str(album_id), option)
     finally:
         stop.set()
         watcher.join(timeout=3)
@@ -160,7 +200,8 @@ def main(argv=None) -> None:
         pass
     try:
         fetch_meta_and_download(
-            args.album_id, args.out_dir, args.proxy, args.meta_only
+            args.album_id, args.out_dir, args.proxy, args.meta_only,
+            args.chapters.split(",") if args.chapters else None, args.cover_path,
         )
     except Exception as exc:
         emit(

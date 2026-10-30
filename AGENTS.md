@@ -7,16 +7,14 @@
 把上游 CLI 工具（jmcomic-calibre，`jmcal` 命令）改造为 **Calibre GUI 插件**：
 输入禁漫漫画 ID → 自动下载 → 打包 CBZ（内嵌 ComicInfo.xml）→ 带元数据直接入库 Calibre。
 
-**当前状态：v0.2.8 本地修复候选版；v0.2.7 阶段 1-4 已验收，处于阶段 5（发布）**。
+**当前状态：基于 v0.2.8（762855b）开发的 v0.3.0 本地候选版，待用户真实站点 / Calibre GUI 验收；v0.2.7 阶段 1-4 已验收。**
 - 2026-10-31：日志中漫画 364522 有 314 张图片 SSL 中断/超时后失败。bridge 固定章节并发 1、图片并发 4，避免上游默认 30 × CPU 核心数放大连接；仍需用户真实站点验证，不能认定站点限流或网络问题已解决。
-- 新构建：`dist/jmdownload-calibre-v0.2.8.zip`；离线测试 46 项（含大合集并发限制及失败不报下载完成）。旧发布简报只适用于 v0.2.7。
-- 发布物：`dist/jmdownload-calibre-v0.2.7.zip`（构建产物）
-- 本地 main 领先 origin/main **25 个提交**（未推送）
-- 测试：`python -m unittest tests.test_plugin`，45 项全过（离线，不碰网络）
-- 工作树 clean
-- 发布交接简报：`reports/release/release-v0.2.7_review_brief.md`（发布操作按它执行）
+- 新构建：`dist/jmdownload-calibre-v0.3.0.zip`；保留 v0.2.8 并发限制，不覆盖旧版本 zip。
+- 测试：`python -m unittest tests.test_plugin`，53 项；真实 Qt 离线冒烟 `calibre-debug -e tests/gui_smoke.py`，13 项。后者启动前应将 `CALIBRE_CONFIG_DIRECTORY` 指向工作区 `.qa-calibre`，隔离用户配置。
+- 2026-10-31：新增可配置自动下载集数门槛（默认 3，0 为始终选择）、章节勾选 / 范围批量选择、下载中追加 ID、队列封面缩略图。离线测试与离屏布局检查通过，真实下载与内容 QC 未执行。
+- 旧发布交接简报：`reports/release/release-v0.2.7_review_brief.md`，只适用于 v0.2.7；v0.3.0 未发布。
 
-## 功能清单（v0.2.7）
+## 功能清单（v0.3.0 候选版）
 
 - 批量输入漫画 ID/网页链接（自动提取 ID、去重、注释行支持）
 - 子进程桥调用系统 Python 的 jmcomic 下载（防黑框、可取消、取消清理半成品）
@@ -28,6 +26,10 @@
 - 工具栏分体按钮 + 下拉菜单（下载/配置/环境检测）
 - 配置面板（解释器/域名/代理/临时目录/判重开关/保留开关 + 环境测试按钮）
 - 会话日志一键复制（状态变化全记录 + 失败堆栈 + jmcomic 日志尾部，环境头信息）
+- 后台独立预读章节 / 封面；超过配置门槛时弹窗，支持 `1-10、12、15-18`，弹窗不显示门槛。
+- 窗口内顺序队列：下载中继续追加 ID、活跃 ID 去重、封面 / 章节 / 状态展示；当前任务取消后继续队列，关闭窗口取消后台任务并等线程退出。队列不跨窗口持久化。
+- 选集打包为一本 CBZ，标题标注章节范围；始终保留 `jmcomic:<原ID>` / `url:`，选集附加 `jmchapters:` 标识符以区别不同选择，已有全本会跳过选集。
+- 按章节顺序逐集下载，输出唯一章节 / 页码文件名，避免多集图片交错或 CBZ 重名；每次任务使用独立临时目录，防止混入旧任务图片。封面预览独立保存，不进入 CBZ。
 
 ## 冻结的架构决策与踩坑清单（勿推翻；新代码必须遵守）
 
@@ -69,7 +71,7 @@
 
 - 代理：代码、离线单测（不碰网络）、构建 zip、git 提交
 - 用户：真实站点联调、Calibre GUI 验收、内容 QC、GitHub push/Release（需用户凭证）
-- 测试：`python -m unittest tests.test_plugin`（45 项，全离线）
+- 测试：`python -m unittest tests.test_plugin`（53 项，全离线）；`tests/gui_smoke.py` 另有 13 项真实 Qt 离线测试，不连接站点 / 书库。
 
 ## 阶段计划与进度
 
@@ -79,11 +81,11 @@
 4. [x] 打磨（4A 配置面板 / 4B 精确进度条 / 4C 下拉菜单 / 4D 日志一键复制 /
        取消闪退修复 / 中途取消清理半成品 / 防黑框全覆盖）
 5. [ ] **发布（进行中，交接简报见 reports/release/）**：
-   - push 25 个提交到 origin/main（需用户凭证）
+   - 用户验收候选版后 push 本地未推送提交到 origin/main（需用户凭证）
    - 打 tag `v0.2.7` 并推送
    - 创建 GitHub Release：标题 `v0.2.7`，上传 `dist/jmdownload-calibre-v0.2.7.zip`，
      说明文案见交接简报第三节
-   - README 增补插件安装/使用说明（仓库现有 README 是上游 CLI 的）
+   - README 已包含插件安装 / 使用说明；v0.3.0 安装包待 GUI 与真实站点验收后再制定对应 Release
 
 ## 协作约定
 

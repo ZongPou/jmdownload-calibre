@@ -13,6 +13,7 @@ from qt.core import (
     QPushButton,
     QVBoxLayout,
     QWidget,
+    QSpinBox,
 )
 
 from calibre_plugins.jmcomic2calibre.common import DEFAULTS, describe_probe
@@ -31,6 +32,16 @@ class ConfigWidget(QWidget):
         form.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
+
+        # Python 解释器
+        self.auto_download_chapters = QSpinBox()
+        self.auto_download_chapters.setRange(0, 9999)
+        self.auto_download_chapters.setValue(int(prefs["auto_download_chapters"]))
+        self.auto_download_chapters.setSuffix(" 集")
+        form.addRow("自动下载集数门槛", self.auto_download_chapters)
+        threshold_hint = QLabel("总集数不超过此值时自动下载全部；超过时选择章节。0 表示始终选择。")
+        threshold_hint.setWordWrap(True)
+        form.addRow("", threshold_hint)
 
         # Python 解释器
         python_row = QHBoxLayout()
@@ -123,6 +134,7 @@ class ConfigWidget(QWidget):
     # ---- 保存 ----
 
     def save_settings(self):
+        prefs["auto_download_chapters"] = self.auto_download_chapters.value()
         prefs["python_path"] = self.python_path.text().strip()
         prefs["web_domain"] = (
             self.web_domain.text().strip() or DEFAULTS["web_domain"]

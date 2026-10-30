@@ -68,7 +68,12 @@ def create_book(
     # 1. 判重（jmcomic:<id>）——在打包前，省掉无用 IO。
     #    new_api(Cache) 没有 get_book_id_from_identifier（那是旧版 legacy API），
     #    用 identifiers 精确搜索（"=" 前缀）代替。
+    identifier = str(meta.get("selection_key") or album_id)
     matches = db.new_api.search(f'identifiers:"=jmcomic:{album_id}"')
+    # 始终保留 jmcomic:<原ID>。选集用附加标识符区分，全本也可覆盖选集判重。
+    matches = {book_id for book_id in matches
+               if not db.new_api.get_metadata(book_id).get_identifiers().get("jmchapters")
+               or db.new_api.get_metadata(book_id).get_identifiers().get("jmchapters") == identifier}
     if matches:
         return {
             "status": "skipped",
@@ -104,7 +109,8 @@ def create_book(
         mi.pubdate = pub_date
     mi.language = "zh"
     mi.set_identifiers(
-        {"jmcomic": str(album_id), "url": build_web_url(web_domain, album_id)}
+        {"jmcomic": str(album_id), "url": build_web_url(web_domain, album_id),
+         **({"jmchapters": identifier} if identifier != str(album_id) else {})}
     )
     cover_ext, cover_data = _load_cover(images)
     if cover_data:

@@ -13,3 +13,4 @@ env/
 .vscode/
 *.opf.bak
 tmp/
+.qa-calibre/

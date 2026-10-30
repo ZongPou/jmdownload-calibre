@@ -23,7 +23,47 @@ DEFAULTS = {
     "keep_workdir": False,    # 保留下载临时目录（排障用）
     "work_dir": "",           # 下载临时目录；留空 = 系统临时目录
     "download_timeout": 1800, # 单本下载超时（秒）
+    "auto_download_chapters": 3,
 }
+
+
+def parse_chapter_range(text: str, count: int) -> list[int]:
+    """解析界面中的章节序号，返回按原书顺序排列的选择；非法输入整次拒绝。"""
+    selected = set()
+    for part in re.split(r"[,，、\s]+", text.strip()):
+        if not part:
+            continue
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        if not match:
+            raise ValueError("请输入章节序号或范围，例如 1-10、12、15-18")
+        start = int(match[1])
+        end = int(match[2] or start)
+        if not 1 <= start <= end <= count:
+            raise ValueError("章节范围必须在 1 到 %d 之间，且起点不大于终点" % count)
+        selected.update(range(start, end + 1))
+    if not selected:
+        raise ValueError("请至少选择一集")
+    return sorted(selected)
+
+
+def chapter_label(numbers: list[int]) -> str:
+    groups = []
+    for n in sorted(set(numbers)):
+        if groups and n == groups[-1][-1] + 1:
+            groups[-1].append(n)
+        else:
+            groups.append([n])
+    return "、".join(str(g[0]) if len(g) == 1 else f"{g[0]}-{g[-1]}" for g in groups)
+
+
+def selection_key(album_id: str, chapters: list[dict], selected: list[str]) -> str:
+    """整本保留旧标识符；选集独立判重，避免挡住同一本的其他章节。"""
+    import hashlib
+    ids = [str(c["id"]) for c in chapters]
+    if not selected or set(selected) == set(ids):
+        return album_id
+    digest = hashlib.sha256(",".join(i for i in ids if i in selected).encode()).hexdigest()[:16]
+    return f"{album_id}-s{digest}"
 
 # ---------- 输入解析 ----------
 

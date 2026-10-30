@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import traceback
 import tempfile
+import base64
 
 from qt.core import QThread, pyqtSignal
 
@@ -30,7 +31,8 @@ class DownloadWorker(QThread):
     message_received = pyqtSignal(object)
 
     def __init__(
-        self, album_ids: list[str], python_cmd: list[str], db, parent=None
+        self, album_ids: list[str], python_cmd: list[str], db, parent=None,
+        selection=None,
     ):
         super().__init__(parent)
         self.album_ids = list(album_ids)
@@ -42,6 +44,7 @@ class DownloadWorker(QThread):
         self.ok_ids: list[str] = []
         self.skipped_ids: list[str] = []
         self.failed: dict[str, str] = {}
+        self.selection = selection or {}
 
     # ---- 对外：取消 ----
 
@@ -69,10 +72,12 @@ class DownloadWorker(QThread):
         base = prefs["work_dir"] or os.path.join(
             tempfile.gettempdir(), "jmcomic2calibre"
         )
-        return os.path.join(base, album_id)
+        os.makedirs(base, exist_ok=True)
+        return tempfile.mkdtemp(prefix=album_id + "_", dir=base)
 
     def _run_one(self, album_id: str, bridge_path: str) -> bool:
         out_dir = self._work_dir(album_id)
+        self._current_out_dir = out_dir
         keep = bool(prefs["keep_workdir"])
         cmd = list(self.python_cmd) + [
             bridge_path,
@@ -82,6 +87,8 @@ class DownloadWorker(QThread):
             out_dir,
         ]
         proxy = prefs["proxy"]
+        if self.selection.get("selected"):
+            cmd += ["--chapters", ",".join(self.selection["selected"])]
         if proxy:
             cmd += ["--proxy", proxy]
 
@@ -96,6 +103,8 @@ class DownloadWorker(QThread):
                 errors="replace",
                 creationflags=_CREATE_NO_WINDOW,
             )
+            if self._cancelled:
+                self._proc.terminate()
         except OSError as exc:
             self.failed[album_id] = f"无法启动解释器: {exc}"
             return False
@@ -130,7 +139,7 @@ class DownloadWorker(QThread):
 
         if self._cancelled:
             if not keep and os.path.isdir(out_dir):
-                shutil.rmtree(downloaded_dir, ignore_errors=True)
+                shutil.rmtree(out_dir, ignore_errors=True)
             self.failed[album_id] = "已取消"
             return False
         def fail_with_log(message: str) -> str:
@@ -152,6 +161,7 @@ class DownloadWorker(QThread):
 
         # ---- 阶段 3：打包入库 ----
         meta = self._meta.get(album_id, {})
+        meta.update(self.selection.get("ingest_meta", {}))
         self.message_received.emit(
             {
                 "event": "ingesting",
@@ -169,6 +179,8 @@ class DownloadWorker(QThread):
                 self.db,
                 prefs["web_domain"],
             )
+            if outcome["status"] == "failed":
+                raise RuntimeError(outcome.get("message") or "入库失败")
         except Exception as exc:
             self.message_received.emit({
                 "event": "log",
@@ -202,7 +214,15 @@ class DownloadWorker(QThread):
             for album_id in self.album_ids:
                 if self._cancelled:
                     break
-                self._run_one(album_id, bridge_path)
+                try:
+                    self._run_one(album_id, bridge_path)
+                except Exception as exc:
+                    self.failed[album_id] = str(exc)
+                    self.message_received.emit({"event": "error", "album_id": album_id,
+                                                "message": str(exc), "traceback": traceback.format_exc()})
+                finally:
+                    if not prefs["keep_workdir"] and getattr(self, "_current_out_dir", None):
+                        shutil.rmtree(self._current_out_dir, ignore_errors=True)
         finally:
             if bridge_path:
                 try:
@@ -217,3 +237,65 @@ class DownloadWorker(QThread):
                 "failed": dict(self.failed),
             }
         )
+
+
+class PrepareWorker(DownloadWorker):
+    """独立后台预读章节和封面，不阻塞正在下载的任务。"""
+
+    def run(self):
+        bridge_path = None
+        try:
+            bridge_path = self._extract_bridge()
+            with tempfile.TemporaryDirectory(prefix="jm_preview_") as tmp:
+                for album_id in self.album_ids:
+                    if self._cancelled:
+                        break
+                    cmd = self.python_cmd + [bridge_path, "--album-id", album_id,
+                        "--out-dir", tmp, "--meta-only", "--cover-path", os.path.join(tmp, "cover.jpg")]
+                    if prefs["proxy"]:
+                        cmd += ["--proxy", prefs["proxy"]]
+                    try:
+                        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                            errors="replace", creationflags=_CREATE_NO_WINDOW)
+                        if self._cancelled:
+                            self._proc.terminate()
+                        output, _ = self._proc.communicate(timeout=120)
+                        meta, cover, error = None, None, None
+                        for line in output.splitlines():
+                            ev = parse_event_line(line)
+                            if not ev:
+                                continue
+                            if ev["event"] == "meta":
+                                meta = ev
+                            elif ev["event"] == "cover":
+                                with open(ev["path"], "rb") as handle:
+                                    cover = base64.b64encode(handle.read()).decode("ascii")
+                            elif ev["event"] == "error":
+                                error = ev.get("message", "读取章节失败")
+                            elif ev["event"] == "log":
+                                self.message_received.emit(ev)
+                        if error or not meta or self._proc.returncode:
+                            raise RuntimeError(error or "无法获取章节列表")
+                        if not self._cancelled:
+                            self.message_received.emit({"event": "prepared", "album_id": album_id,
+                                                        "meta": meta, "cover": cover})
+                    except Exception as exc:
+                        if self._proc is not None and self._proc.poll() is None:
+                            self._proc.kill()
+                            self._proc.communicate()
+                        if not self._cancelled:
+                            self.message_received.emit({"event": "prepare_error", "album_id": album_id,
+                                                        "message": str(exc)})
+                    finally:
+                        self._proc = None
+        except Exception as exc:
+            for album_id in self.album_ids:
+                self.message_received.emit({"event": "prepare_error", "album_id": album_id,
+                                            "message": str(exc)})
+        finally:
+            if bridge_path:
+                try:
+                    os.unlink(bridge_path)
+                except OSError:
+                    pass
