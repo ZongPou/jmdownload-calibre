@@ -29,7 +29,7 @@ from qt.core import (
 
 from calibre_plugins.jmcomic2calibre.common import describe_probe, parse_album_ids
 from calibre_plugins.jmcomic2calibre.config import prefs
-from calibre_plugins.jmcomic2calibre.common import parse_chapter_range, chapter_label, selection_key
+from calibre_plugins.jmcomic2calibre.common import parse_chapter_range, chapter_label, selection_key, download_title
 
 LOG_MAX_LINES = 3000  # 日志缓冲上限（超出丢弃最旧的）
 
@@ -305,7 +305,7 @@ class DownloadDialog(QDialog):
 
     def _render_task(self, task):
         task["item"].setText("%s\nID %s · %s\n%s" % (
-            task.get("meta", {}).get("title", task["id"]), task["id"],
+            task.get("ingest_meta", {}).get("title") or task.get("meta", {}).get("title", task["id"]), task["id"],
             task.get("label", "正在获取章节与封面"), task["state"]))
         task["item"].setToolTip(task.get("error", ""))
         self._update_queue_buttons()
@@ -339,9 +339,8 @@ class DownloadDialog(QDialog):
         chapters = task["meta"]["chapters"]
         numbers = [c["number"] for c in chapters if c["id"] in selected]
         label = "全部 %d 集" % len(chapters) if len(selected) == len(chapters) else "第 %s 集" % chapter_label(numbers)
-        ingest_meta = {"selection_key": selection_key(task["id"], chapters, selected)}
-        if len(selected) != len(chapters):
-            ingest_meta["title"] = task["meta"]["title"] + "（" + label + "）"
+        ingest_meta = {"selection_key": selection_key(task["id"], chapters, selected),
+                       "title": download_title(task["meta"]["title"], numbers, task["id"])}
         task.update(state="等待中", selected=selected, label=label, ingest_meta=ingest_meta)
 
     def edit_selected_task(self):

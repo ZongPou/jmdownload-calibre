@@ -56,6 +56,14 @@ def chapter_label(numbers: list[int]) -> str:
     return "、".join(str(g[0]) if len(g) == 1 else f"{g[0]}-{g[-1]}" for g in groups)
 
 
+def download_title(title: str, numbers: list[int], fallback: str) -> str:
+    """下载命名：漫画名 第1-10话；只清理标题开头的方括号附注。"""
+    original = str(title or "").strip() or fallback
+    name = re.sub(r"^(?:\s*(?:\[[^\[\]]*\]|【[^【】]*】))+\s*", "", original).strip()
+    name = name or original  # 整个标题都在括号中时保留，避免丢失书名。
+    return f"{name} 第{chapter_label(numbers)}话" if numbers else name
+
+
 def selection_key(album_id: str, chapters: list[dict], selected: list[str]) -> str:
     """整本保留旧标识符；选集独立判重，避免挡住同一本的其他章节。"""
     import hashlib

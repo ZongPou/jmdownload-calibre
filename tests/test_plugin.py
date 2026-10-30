@@ -161,6 +161,15 @@ class TestParseAlbumIds(unittest.TestCase):
 
 
 class TestChapterSelection(unittest.TestCase):
+    def test_download_naming_keeps_title_and_exact_chapter_selection(self):
+        from calibre_plugin.common import download_title
+        self.assertEqual("鬼畜英雄 第1-10话", download_title("[漫漫長夜翻譯組] [よのき] 鬼畜英雄", list(range(1, 11)), "123"))
+        self.assertEqual("鬼畜英雄 第3话", download_title("鬼畜英雄", [3], "123"))
+        self.assertEqual("鬼畜英雄 第1-3、5话", download_title("【翻译组】 鬼畜英雄", [1, 2, 3, 5], "123"))
+        self.assertEqual("故事 [特别篇] 第1话", download_title("故事 [特别篇]", [1], "123"))
+        self.assertEqual("[完整书名] 第1话", download_title("[完整书名]", [1], "123"))
+        self.assertEqual("123 第1话", download_title("", [1], "123"))
+
     def test_range_and_mixed_separators(self):
         from calibre_plugin.common import parse_chapter_range
         self.assertEqual([1, 2, 3, 5, 7, 8], parse_chapter_range("1-3、5，7-8,2", 8))
@@ -430,7 +439,7 @@ class TestConfigDefaults(unittest.TestCase):
 
 class TestBuildPlugin(unittest.TestCase):
     def test_read_version(self):
-        self.assertEqual("0.3.1", read_version())
+        self.assertEqual("0.3.2", read_version())
 
     def test_collect_files_excludes_cache(self):
         names = {f.name for f in collect_files()}

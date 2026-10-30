@@ -74,6 +74,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual("等待中", t["state"])
         self.assertEqual(["101", "102", "103"], t["selected"])
         self.assertEqual("123", t["ingest_meta"]["selection_key"])
+        self.assertEqual("测试漫画 第1-3话", t["ingest_meta"]["title"])
 
     def test_over_threshold_uses_dialog_and_range(self):
         t = self.task(12)
@@ -85,7 +86,7 @@ class GuiTests(unittest.TestCase):
             self.dialog._choose_next()
         self.assertEqual(10, len(t["selected"]))
         self.assertEqual("第 1-10 集", t["label"])
-        self.assertIn("第 1-10 集", t["ingest_meta"]["title"])
+        self.assertEqual("测试漫画 第1-10话", t["ingest_meta"]["title"])
 
     def test_skip_does_not_download(self):
         t = self.task(4)
@@ -182,6 +183,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual("等待中", task["state"])
         self.assertEqual(["103", "104", "105"], task["selected"])
         self.assertEqual("第 3-5 集", task["label"])
+        self.assertEqual("测试漫画 第3-5话", task["ingest_meta"]["title"])
         self.assertNotEqual(old_key, task["ingest_meta"]["selection_key"])
 
     def test_dismiss_edit_keeps_old_chapters_and_active_cannot_edit(self):
@@ -312,8 +314,14 @@ class IngestTests(unittest.TestCase):
         db.add_books.return_value = [2]
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "1.jpg").write_bytes(b"image")
-            result = create_book("123", tmp, {"title": "其他选集", "selection_key": "123-ssecond"}, db)
+            result = create_book("123", tmp, {"title": "鬼畜英雄 第1-10话", "selection_key": "123-ssecond"}, db)
             self.assertEqual("ingested", result["status"])
+            cbz = Path(db.add_books.call_args.args[0][0])
+            self.assertEqual("鬼畜英雄 第1-10话.cbz", cbz.name)
+            self.assertEqual("鬼畜英雄 第1-10话", db.add_books.call_args.args[2][0].title)
+            import zipfile
+            with zipfile.ZipFile(cbz) as archive:
+                self.assertIn("<Title>鬼畜英雄 第1-10话</Title>", archive.read("ComicInfo.xml").decode("utf-8"))
             identifiers = db.add_books.call_args.args[2][0].get_identifiers()
             self.assertEqual("123", identifiers["jmcomic"])
             self.assertEqual("123-ssecond", identifiers["jmchapters"])
