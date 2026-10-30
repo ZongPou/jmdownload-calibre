@@ -64,6 +64,7 @@ class GuiTests(unittest.TestCase):
         self.dialog.queue_list.addItem(item)
         t = {"id": "123", "state": "待选择章节", "meta": metadata(n), "item": item}
         self.dialog._tasks.append(t)
+        self.dialog._render_task(t)
         return t
 
     def test_threshold_boundary_downloads_all_without_dialog(self):
@@ -126,15 +127,22 @@ class GuiTests(unittest.TestCase):
         pixmap.save(buf, "PNG")
         self.dialog._on_prepared({"event": "prepared", "album_id": "123", "meta": metadata(3),
                                  "cover": base64.b64encode(bytes(data)).decode()})
-        self.assertFalse(t["item"].icon().isNull())
+        self.assertFalse(t["cover"].isNull())
+        self.assertFalse(t["row"].cover.pixmap().isNull())
 
     def test_cancel_only_current_and_waits_for_finished(self):
+        task = self.task(4)
+        task["state"] = "下载中"
+        self.dialog._active_task = task
         self.dialog._worker = Mock()
         self.dialog.set_downloading_ui(True)
-        self.dialog.cancel_current()
+        task["row"].remove_button.click()
         self.dialog._worker.cancel.assert_called_once()
         self.assertTrue(self.dialog._downloading)
-        self.assertFalse(self.dialog.cancel_button.isEnabled())
+        self.assertEqual([], self.dialog._tasks)
+        self.assertEqual(0, self.dialog.queue_list.count())
+        self.dialog.report_all_done({"failed": {"123": "已取消"}})
+        self.assertEqual(0, self.dialog.queue_list.count())
 
     def test_cancel_waiting_tasks_keeps_current_download_running(self):
         first = self.task(4)
@@ -145,10 +153,11 @@ class GuiTests(unittest.TestCase):
         self.dialog._active_task = first
         self.dialog._worker = Mock()
         self.dialog.set_downloading_ui(True)
-        second["item"].setSelected(True)
-        self.assertTrue(self.dialog.edit_task_button.isEnabled())
-        self.dialog.cancel_selected_tasks()
+        self.dialog._render_task(second)
+        self.assertTrue(second["row"].edit_button.isEnabled())
+        second["row"].remove_button.click()
         self.assertEqual("已取消", second["state"])
+        self.assertEqual([first], self.dialog._tasks)
         self.assertEqual("下载中", first["state"])
         self.dialog._worker.cancel.assert_not_called()
 
@@ -158,8 +167,7 @@ class GuiTests(unittest.TestCase):
         self.dialog._preparing_task = old
         self.dialog._prepare_busy = True
         self.dialog._prepare = Mock()
-        old["item"].setSelected(True)
-        self.dialog.cancel_selected_tasks()
+        old["row"].remove_button.click()
         self.dialog._prepare.cancel.assert_called_once()
         new = self.task(4)
         new["state"] = "读取章节中"
@@ -170,7 +178,7 @@ class GuiTests(unittest.TestCase):
     def test_edit_restores_selection_and_updates_range_without_auto_start(self):
         task = self.task(12)
         self.dialog._apply_selection(task, ["101", "102"])
-        task["item"].setSelected(True)
+        self.dialog._render_task(task)
         old_key = task["ingest_meta"]["selection_key"]
         def execute(d):
             self.assertEqual(["101", "102"], d.selected_ids())
@@ -179,7 +187,7 @@ class GuiTests(unittest.TestCase):
             d.apply_range()
             return QDialog.DialogCode.Accepted
         with patch.object(ChapterDialog, "exec", execute):
-            self.dialog.edit_selected_task()
+            task["row"].edit_button.click()
         self.assertEqual("等待中", task["state"])
         self.assertEqual(["103", "104", "105"], task["selected"])
         self.assertEqual("第 3-5 集", task["label"])
@@ -189,25 +197,35 @@ class GuiTests(unittest.TestCase):
     def test_dismiss_edit_keeps_old_chapters_and_active_cannot_edit(self):
         task = self.task(8)
         self.dialog._apply_selection(task, ["101"])
-        task["item"].setSelected(True)
+        self.dialog._render_task(task)
         with patch.object(ChapterDialog, "exec", return_value=QDialog.DialogCode.Rejected):
-            self.dialog.edit_selected_task()
+            task["row"].edit_button.click()
         self.assertEqual(["101"], task["selected"])
         self.assertEqual("等待中", task["state"])
         task["state"] = "下载中"
         self.dialog._render_task(task)
-        self.assertFalse(self.dialog.edit_task_button.isEnabled())
+        self.assertFalse(task["row"].edit_button.isEnabled())
         with patch.object(ChapterDialog, "exec") as execute:
-            self.dialog.edit_selected_task()
+            task["row"].edit_button.click()
             execute.assert_not_called()
 
-    def test_cancel_multiple_selected_tasks(self):
+    def test_remove_completed_tasks_and_repeated_remove_are_safe(self):
+        tasks = []
         for _ in range(3):
             t = self.task(4)
-            t["state"] = "等待中"
-            t["item"].setSelected(True)
-        self.dialog.cancel_selected_tasks()
-        self.assertEqual(["已取消"] * 3, [t["state"] for t in self.dialog._tasks])
+            t["state"] = "完成"
+            tasks.append(t)
+        for t in tasks:
+            t["row"].remove_button.click()
+            self.dialog.remove_task(t)
+        self.assertEqual([], self.dialog._tasks)
+        self.assertEqual(0, self.dialog.queue_list.count())
+        self.dialog.gui.current_db.delete_books.assert_not_called()
+
+    def test_main_dialog_has_only_requested_global_buttons(self):
+        from qt.core import QPushButton
+        labels = [b.text() for b in self.dialog.findChildren(QPushButton)]
+        self.assertEqual(["复制日志", "添加并下载", "关闭"], labels)
 
     def test_progress_stays_busy_until_selected_total_is_known(self):
         self.dialog.on_worker_event({"event": "meta", "total_images": 0})
@@ -254,6 +272,12 @@ class WorkerTests(unittest.TestCase):
 
 class PipelineTests(unittest.TestCase):
     def test_real_threads_continue_queue_after_append(self):
+        self._run_pipeline()
+
+    def test_remove_active_row_waits_for_worker_then_starts_next(self):
+        self._run_pipeline(remove_active=True)
+
+    def _run_pipeline(self, remove_active=False):
         config.prefs.update(DEFAULTS)
         import threading
         import time
@@ -263,6 +287,9 @@ class PipelineTests(unittest.TestCase):
             if album_id == "123":
                 started.set()
                 release.wait(3)
+            if worker._cancelled:
+                worker.failed[album_id] = "已取消"
+                return False
             worker.ok_ids.append(album_id)
             completed.append(album_id)
         with tempfile.TemporaryDirectory() as tmp:
@@ -287,13 +314,19 @@ class PipelineTests(unittest.TestCase):
                             self.assertTrue(started.wait(2))
                             self.assertTrue(dialog._downloading)
                     self.assertEqual("等待中", dialog._tasks[1]["state"])
+                    if remove_active:
+                        dialog._tasks[0]["row"].remove_button.click()
+                        self.assertTrue(dialog._downloading)
+                        self.assertEqual(1, dialog.queue_list.count())
+                        self.assertEqual(["456"], [t["id"] for t in dialog._tasks])
                     release.set()
                     deadline = time.monotonic() + 3
-                    while time.monotonic() < deadline and (dialog._downloading or len(completed) < 2):
+                    expected = ["456"] if remove_active else ["123", "456"]
+                    while time.monotonic() < deadline and (dialog._downloading or len(completed) < len(expected)):
                         APP.processEvents()
                         time.sleep(0.005)
-                    self.assertEqual(["123", "456"], completed)
-                    self.assertEqual(["完成", "完成"], [t["state"] for t in dialog._tasks])
+                    self.assertEqual(expected, completed)
+                    self.assertEqual(["完成"] * len(expected), [t["state"] for t in dialog._tasks])
                 finally:
                     release.set()
                     dialog._closing = True

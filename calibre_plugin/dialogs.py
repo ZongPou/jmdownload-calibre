@@ -25,6 +25,7 @@ from qt.core import (
     pyqtSignal,
     QThread,
     QListWidget, QListWidgetItem, QLineEdit, QMessageBox, Qt, QSize, QIcon, QPixmap, QAbstractItemView,
+    QWidget, QSizePolicy,
 )
 
 from calibre_plugins.jmcomic2calibre.common import describe_probe, parse_album_ids
@@ -32,6 +33,55 @@ from calibre_plugins.jmcomic2calibre.config import prefs
 from calibre_plugins.jmcomic2calibre.common import parse_chapter_range, chapter_label, selection_key, download_title
 
 LOG_MAX_LINES = 3000  # 日志缓冲上限（超出丢弃最旧的）
+
+
+class TaskRow(QWidget):
+    """每条任务内的封面、文字及直接操作入口。"""
+
+    def __init__(self, dialog, task):
+        super().__init__()
+        self.setAutoFillBackground(True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 5, 6, 5)
+        self.cover = QLabel()
+        self.cover.setFixedSize(48, 68)
+        self.cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.cover)
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        self.title = QLabel()
+        self.detail = QLabel()
+        self.status = QLabel()
+        for label in (self.title, self.detail, self.status):
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            text.addWidget(label)
+        layout.addLayout(text, 1)
+        self.edit_button = QPushButton("修改")
+        self.edit_button.setAutoDefault(False)
+        self.edit_button.setToolTip("修改等待中任务的下载章节")
+        self.edit_button.clicked.connect(lambda: dialog.edit_task(task))
+        layout.addWidget(self.edit_button)
+        self.remove_button = QPushButton("×")
+        self.remove_button.setAutoDefault(False)
+        self.remove_button.setFixedWidth(30)
+        self.remove_button.setToolTip("移除任务；正在下载的任务会取消下载")
+        self.remove_button.clicked.connect(lambda: dialog.remove_task(task))
+        layout.addWidget(self.remove_button)
+
+    def update_task(self, task):
+        title = task.get("ingest_meta", {}).get("title") or task.get("meta", {}).get("title", task["id"])
+        self.title.setText(title)
+        self.title.setToolTip(title)
+        self.detail.setText("ID %s · %s" % (task["id"], task.get("label", "正在获取章节与封面")))
+        self.status.setText(task["state"])
+        self.status.setToolTip(task.get("error", ""))
+        self.edit_button.setEnabled(task["state"] == "等待中")
+        icon = task.get("cover")
+        if icon is not None and not icon.isNull():
+            self.cover.setPixmap(icon.pixmap(48, 68))
+        else:
+            self.cover.setText("暂无\n封面")
 
 
 class ChapterDialog(QDialog):
@@ -70,10 +120,10 @@ class ChapterDialog(QDialog):
         self.count = QLabel()
         layout.addWidget(self.count)
         buttons = QHBoxLayout()
-        skip = QPushButton("跳过此漫画")
-        skip.clicked.connect(self.reject)
-        buttons.addWidget(skip)
-        self.confirm = QPushButton("确认并加入队列")
+        self.skip_button = QPushButton("跳过此漫画")
+        self.skip_button.clicked.connect(self.reject)
+        buttons.addWidget(self.skip_button)
+        self.confirm = QPushButton("确认并下载")
         self.confirm.clicked.connect(self.accept)
         buttons.addWidget(self.confirm)
         layout.addLayout(buttons)
@@ -163,21 +213,8 @@ class DownloadDialog(QDialog):
         self.queue_list = QListWidget()
         self.queue_list.setIconSize(QSize(48, 68))
         self.queue_list.setMinimumHeight(220)
-        self.queue_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.queue_list.setToolTip("选中任务后修改章节或取消；Ctrl / Shift 可多选取消。")
+        self.queue_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         layout.addWidget(self.queue_list)
-        queue_buttons = QHBoxLayout()
-        self.edit_task_button = QPushButton("修改所选任务章节")
-        self.edit_task_button.setToolTip("修改等待中的任务；正在下载的任务请先取消，再重新添加。")
-        self.edit_task_button.clicked.connect(self.edit_selected_task)
-        queue_buttons.addWidget(self.edit_task_button)
-        self.cancel_task_button = QPushButton("取消所选任务")
-        self.cancel_task_button.clicked.connect(self.cancel_selected_tasks)
-        queue_buttons.addWidget(self.cancel_task_button)
-        queue_buttons.addStretch(1)
-        layout.addLayout(queue_buttons)
-        self.queue_list.itemSelectionChanged.connect(self._update_queue_buttons)
-        self._update_queue_buttons()
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)  # 不确定进度（busy）
@@ -185,12 +222,6 @@ class DownloadDialog(QDialog):
         layout.addWidget(self.progress_bar)
 
         buttons = QHBoxLayout()
-        self.reprobe_button = QPushButton("重新检测环境")
-        self.reprobe_button.clicked.connect(self.start_probe)
-        buttons.addWidget(self.reprobe_button)
-        config_button = QPushButton("配置")
-        config_button.clicked.connect(self.plugin.show_config)
-        buttons.addWidget(config_button)
         self.copy_log_button = QPushButton("复制日志")
         self.copy_log_button.setToolTip(
             "复制本次会话的操作日志到剪贴板（报障时请粘贴给开发者）"
@@ -198,14 +229,10 @@ class DownloadDialog(QDialog):
         self.copy_log_button.clicked.connect(self.copy_log)
         buttons.addWidget(self.copy_log_button)
         buttons.addStretch(1)
-        self.download_button = QPushButton("添加到队列")
+        self.download_button = QPushButton("添加并下载")
         self.download_button.setEnabled(False)
         self.download_button.clicked.connect(self.on_download_clicked)
         buttons.addWidget(self.download_button)
-        self.cancel_button = QPushButton("取消当前任务")
-        self.cancel_button.setEnabled(False)
-        self.cancel_button.clicked.connect(self.cancel_current)
-        buttons.addWidget(self.cancel_button)
         close_button = QPushButton("关闭")
         close_button.clicked.connect(self.reject)
         buttons.addWidget(close_button)
@@ -304,33 +331,34 @@ class DownloadDialog(QDialog):
         self._start_prepare()
 
     def _render_task(self, task):
-        task["item"].setText("%s\nID %s · %s\n%s" % (
-            task.get("ingest_meta", {}).get("title") or task.get("meta", {}).get("title", task["id"]), task["id"],
-            task.get("label", "正在获取章节与封面"), task["state"]))
-        task["item"].setToolTip(task.get("error", ""))
-        self._update_queue_buttons()
+        if task.get("removed"):
+            return
+        if "row" not in task:
+            task["item"].setSizeHint(QSize(560, 82))
+            task["row"] = TaskRow(self, task)
+            self.queue_list.setItemWidget(task["item"], task["row"])
+        task["row"].update_task(task)
 
-    def _selected_tasks(self):
-        items = self.queue_list.selectedItems()
-        return [t for t in self._tasks if t["item"] in items]
-
-    def _update_queue_buttons(self):
-        tasks = self._selected_tasks()
-        self.cancel_task_button.setEnabled(any(t["state"] in (
-            "待读取章节", "读取章节中", "待选择章节", "等待中", "下载中") for t in tasks))
-        self.edit_task_button.setEnabled(len(tasks) == 1 and tasks[0]["state"] == "等待中")
-
-    def cancel_selected_tasks(self):
-        for task in self._selected_tasks():
-            state = task["state"]
-            if state == "下载中":
-                self.cancel_current()
-            elif state in ("待读取章节", "读取章节中", "待选择章节", "等待中"):
-                task["state"] = "已取消"
-                self._log("取消队列任务：" + task["id"])
-                if state == "读取章节中" and task is self._preparing_task and self._prepare_busy:
-                    self._prepare.cancel()
-                self._render_task(task)
+    def remove_task(self, task):
+        if task.get("removed"):
+            return
+        state = task["state"]
+        if task is self._active_task and self._downloading and state == "下载中":
+            self.cancel_current()
+        elif state == "读取章节中" and task is self._preparing_task and self._prepare_busy:
+            self._prepare.cancel()
+        task["removed"] = True
+        if task is not self._active_task:
+            task["state"] = "已取消"
+        self._tasks = [t for t in self._tasks if t is not task]
+        row = self.queue_list.row(task["item"])
+        if row >= 0:
+            self.queue_list.removeItemWidget(task["item"])
+            self.queue_list.takeItem(row)
+        widget = task.pop("row", None)
+        if widget is not None:
+            widget.deleteLater()
+        self._log("移除队列任务：" + task["id"])
         self._start_next()
         self._start_prepare()
         QTimer.singleShot(0, self._choose_next)
@@ -343,16 +371,17 @@ class DownloadDialog(QDialog):
                        "title": download_title(task["meta"]["title"], numbers, task["id"])}
         task.update(state="等待中", selected=selected, label=label, ingest_meta=ingest_meta)
 
-    def edit_selected_task(self):
-        tasks = self._selected_tasks()
-        if self._selection_open or len(tasks) != 1 or tasks[0]["state"] != "等待中":
+    def edit_task(self, task):
+        if self._selection_open or task.get("removed") or task["state"] != "等待中":
             return
-        task = tasks[0]
         self._selection_open = True
         task["state"] = "修改章节中"
         self._render_task(task)
         try:
             dialog = ChapterDialog(self, task["meta"], task["selected"])
+            dialog.setWindowTitle("修改下载章节")
+            dialog.confirm.setText("保存修改")
+            dialog.skip_button.setText("取消")
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 self._apply_selection(task, dialog.selected_ids())
                 self._log("修改队列章节：%s · %s" % (task["id"], task["label"]))
@@ -406,7 +435,7 @@ class DownloadDialog(QDialog):
                 pixmap = QPixmap()
                 pixmap.loadFromData(base64.b64decode(ev["cover"]))
                 if not pixmap.isNull():
-                    task["item"].setIcon(QIcon(pixmap))
+                    task["cover"] = QIcon(pixmap)
         self._render_task(task)
         QTimer.singleShot(0, self._choose_next)
         self._start_next()
@@ -472,9 +501,6 @@ class DownloadDialog(QDialog):
 
     def set_downloading_ui(self, downloading: bool):
         self._downloading = downloading
-        self.reprobe_button.setEnabled(not downloading)
-        self.download_button.setText("添加到队列")
-        self.cancel_button.setEnabled(downloading)
 
     def cancel_current(self):
         if self._downloading:
@@ -482,7 +508,6 @@ class DownloadDialog(QDialog):
             if self._active_task:
                 self._active_task["state"] = "取消中"
                 self._render_task(self._active_task)
-            self.cancel_button.setEnabled(False)
             self.status_label.setText("正在取消当前任务…")
             self._log("用户请求取消当前任务，队列中的其他任务保留")
 

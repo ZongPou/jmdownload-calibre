@@ -439,7 +439,7 @@ class TestConfigDefaults(unittest.TestCase):
 
 class TestBuildPlugin(unittest.TestCase):
     def test_read_version(self):
-        self.assertEqual("0.3.2", read_version())
+        self.assertEqual("0.3.3", read_version())
 
     def test_collect_files_excludes_cache(self):
         names = {f.name for f in collect_files()}
