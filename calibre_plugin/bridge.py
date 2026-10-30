@@ -71,6 +71,7 @@ def parse_args(argv=None):
     parser.add_argument("--chapters", default="", help="选中的章节 ID，以逗号分隔")
     parser.add_argument("--cover-path", default="", help="预览封面的独立存储路径")
     parser.add_argument("--album-cache", default="", help="预读漫画详情的 JSON 文件")
+    parser.add_argument("--cover-only", action="store_true", help="仅获取队列封面，不请求章节")
     parser.add_argument(
         "--meta-only",
         action="store_true",
@@ -93,6 +94,7 @@ def count_images(out_dir: str) -> int:
 def fetch_meta_and_download(
     album_id: str, out_dir: str, proxy: str, meta_only: bool = False,
     chapter_ids: list[str] | None = None, cover_path: str = "", album_cache: str = "",
+    cover_only: bool = False,
 ) -> None:
     import jmcomic  # 系统环境里的 jmcomic
 
@@ -113,6 +115,12 @@ def fetch_meta_and_download(
 
     # 与 JmDownloader 使用 option 缓存的同一个 client，复用连接及设置。
     client = option.build_jm_client()
+    if cover_only:
+        if not cover_path:
+            raise ValueError("封面输出路径不能为空")
+        client.download_album_cover(str(album_id), cover_path, size="_3x4")
+        emit({"event": "cover", "path": cover_path})
+        return
     album = None
     if album_cache:
         try:
@@ -154,7 +162,7 @@ def fetch_meta_and_download(
     if meta_only:
         if cover_path:
             try:
-                client.download_album_cover(str(album_id), cover_path)
+                client.download_album_cover(str(album_id), cover_path, size="_3x4")
                 emit({"event": "cover", "path": cover_path})
             except Exception as exc:
                 emit({"event": "log", "message": "封面预览获取失败（不影响下载）: " + str(exc)})
@@ -250,6 +258,7 @@ def main(argv=None) -> None:
             args.album_id, args.out_dir, args.proxy, args.meta_only,
             args.chapters.split(",") if args.chapters else None, args.cover_path,
             args.album_cache,
+            args.cover_only,
         )
     except Exception as exc:
         emit(

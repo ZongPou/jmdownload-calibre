@@ -24,7 +24,7 @@ from qt.core import (
     QVBoxLayout,
     pyqtSignal,
     QThread,
-    QListWidget, QListWidgetItem, QLineEdit, QMessageBox, Qt, QSize, QIcon, QPixmap, QAbstractItemView,
+    QListWidget, QListWidgetItem, QLineEdit, QMessageBox, Qt, QSize, QPixmap, QAbstractItemView,
     QWidget, QSizePolicy,
 )
 
@@ -77,9 +77,10 @@ class TaskRow(QWidget):
         self.status.setText(task["state"])
         self.status.setToolTip(task.get("error", ""))
         self.edit_button.setEnabled(task["state"] == "等待中")
-        icon = task.get("cover")
-        if icon is not None and not icon.isNull():
-            self.cover.setPixmap(icon.pixmap(48, 68))
+        pixmap = task.get("cover")
+        if pixmap is not None and not pixmap.isNull():
+            self.cover.setPixmap(pixmap.scaled(48, 68, Qt.AspectRatioMode.KeepAspectRatio,
+                                              Qt.TransformationMode.SmoothTransformation))
         else:
             self.cover.setText("暂无\n封面")
 
@@ -187,6 +188,8 @@ class DownloadDialog(QDialog):
         self._selection_open = False
         self._closing = False
         self._active_task = None
+        # 两个封面槽独立于章节预读。finished 后保留引用，到槽位下次启动时覆盖。
+        self._cover_slots = [{"worker": None, "busy": False}, {"worker": None, "busy": False}]
 
         self.setWindowTitle("JMdownload 下载")
         self.setMinimumWidth(660)
@@ -347,6 +350,9 @@ class DownloadDialog(QDialog):
             self.cancel_current()
         elif state == "读取章节中" and task is self._preparing_task and self._prepare_busy:
             self._prepare.cancel()
+        for slot in self._cover_slots:
+            if slot["busy"] and slot["worker"].queue_task is task:
+                slot["worker"].cancel()
         task["removed"] = True
         if task is not self._active_task:
             task["state"] = "已取消"
@@ -430,15 +436,61 @@ class DownloadDialog(QDialog):
             task.update(state="失败", error=ev["message"], label="读取失败，可重新添加")
             self._log("读取章节失败 %s: %s" % (task["id"], ev["message"]))
         else:
-            task.update(meta=ev["meta"], state="待选择章节")
+            task.update(meta=ev["meta"], state="待选择章节", cover_state="pending")
             if ev.get("cover"):
                 pixmap = QPixmap()
                 pixmap.loadFromData(base64.b64decode(ev["cover"]))
                 if not pixmap.isNull():
-                    task["cover"] = QIcon(pixmap)
+                    task.update(cover=pixmap, cover_state="ready")
         self._render_task(task)
         QTimer.singleShot(0, self._choose_next)
         self._start_next()
+        self._start_cover_jobs()
+
+    def _start_cover_jobs(self):
+        if self._closing:
+            return
+        from calibre_plugins.jmcomic2calibre.worker import CoverWorker
+        for slot in self._cover_slots:
+            if slot["busy"]:
+                continue
+            task = next((t for t in self._tasks if t.get("cover_state") == "pending"
+                         and t["state"] not in ("已取消", "已跳过", "失败")), None)
+            if task is None:
+                return
+            task["cover_state"] = "loading"
+            worker = CoverWorker([task["id"]], self._python_cmd, None)
+            worker.queue_task = task
+            slot.update(worker=worker, busy=True)
+            worker.message_received.connect(self._on_cover_event)
+            worker.finished.connect(self._cover_finished)
+            worker.finished.connect(worker.deleteLater)
+            worker.start()
+
+    def _cover_finished(self):
+        sender = self.sender()
+        for slot in self._cover_slots:
+            if slot["worker"] is sender:
+                slot["busy"] = False
+                break
+        self._start_cover_jobs()
+
+    def _on_cover_event(self, ev, task=None):
+        task = task or getattr(self.sender(), "queue_task", None)
+        if self._closing or task is None or task.get("removed"):
+            return
+        if ev["event"] == "cover_error":
+            task["cover_state"] = "failed"
+            self._log("封面读取失败 %s（不影响下载）：%s" % (task["id"], ev["message"]))
+            return
+        pixmap = QPixmap()
+        pixmap.loadFromData(base64.b64decode(ev["cover"]))
+        if pixmap.isNull():
+            task["cover_state"] = "failed"
+            self._log("封面图片无法显示：" + task["id"])
+            return
+        task.update(cover=pixmap, cover_state="ready")
+        self._render_task(task)
 
     def _choose_next(self):
         if self._closing or self._selection_open:
@@ -680,8 +732,12 @@ class DownloadDialog(QDialog):
                 self._worker.cancel()
             if self._prepare_busy:
                 self._prepare.cancel()
+            for slot in self._cover_slots:
+                if slot["busy"]:
+                    slot["worker"].cancel()
         # 不销毁仍在运行的 QThread；finished 信号在事件循环中处理后再关窗。
-        if self._downloading or self._prepare_busy or self._probe is not None:
+        if (self._downloading or self._prepare_busy or self._probe is not None
+                or any(slot["busy"] for slot in self._cover_slots)):
             QTimer.singleShot(100, self.reject)
             return
         super().reject()

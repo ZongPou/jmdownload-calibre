@@ -161,6 +161,17 @@ class TestParseAlbumIds(unittest.TestCase):
 
 
 class TestChapterSelection(unittest.TestCase):
+    def test_cover_only_uses_portrait_without_requesting_album_or_chapters(self):
+        from calibre_plugin.bridge import fetch_meta_and_download
+        fake, client = self._fake_jm()
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit") as emit:
+            path = os.path.join(tmp, "cover.jpg")
+            fetch_meta_and_download("123", tmp, "", cover_path=path, cover_only=True)
+            client.download_album_cover.assert_called_once_with("123", path, size="_3x4")
+            client.get_album_detail.assert_not_called()
+            client.get_photo_detail.assert_not_called()
+            self.assertEqual("cover", emit.call_args.args[0]["event"])
+
     def test_download_naming_keeps_title_and_exact_chapter_selection(self):
         from calibre_plugin.common import download_title
         self.assertEqual("鬼畜英雄 第1-10话", download_title("[漫漫長夜翻譯組] [よのき] 鬼畜英雄", list(range(1, 11)), "123"))
@@ -439,7 +450,7 @@ class TestConfigDefaults(unittest.TestCase):
 
 class TestBuildPlugin(unittest.TestCase):
     def test_read_version(self):
-        self.assertEqual("0.3.3", read_version())
+        self.assertEqual("0.3.4", read_version())
 
     def test_collect_files_excludes_cache(self):
         names = {f.name for f in collect_files()}
