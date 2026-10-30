@@ -89,6 +89,12 @@ class DownloadWorker(QThread):
         proxy = prefs["proxy"]
         if self.selection.get("selected"):
             cmd += ["--chapters", ",".join(self.selection["selected"])]
+        snapshot = self.selection.get("meta", {}).get("album_snapshot")
+        if snapshot:
+            cache_path = os.path.join(out_dir, "album.json")
+            with open(cache_path, "w", encoding="utf-8") as handle:
+                json.dump(snapshot, handle, ensure_ascii=False)
+            cmd += ["--album-cache", cache_path]
         if proxy:
             cmd += ["--proxy", proxy]
 

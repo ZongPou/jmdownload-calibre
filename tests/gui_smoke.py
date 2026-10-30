@@ -135,6 +135,89 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(self.dialog._downloading)
         self.assertFalse(self.dialog.cancel_button.isEnabled())
 
+    def test_cancel_waiting_tasks_keeps_current_download_running(self):
+        first = self.task(4)
+        second = self.task(4)
+        second["id"] = "456"
+        first["state"] = "下载中"
+        self.dialog._apply_selection(second, ["101"])
+        self.dialog._active_task = first
+        self.dialog._worker = Mock()
+        self.dialog.set_downloading_ui(True)
+        second["item"].setSelected(True)
+        self.assertTrue(self.dialog.edit_task_button.isEnabled())
+        self.dialog.cancel_selected_tasks()
+        self.assertEqual("已取消", second["state"])
+        self.assertEqual("下载中", first["state"])
+        self.dialog._worker.cancel.assert_not_called()
+
+    def test_cancel_preparing_ignores_late_result_even_after_same_id_readded(self):
+        old = self.task(4)
+        old["state"] = "读取章节中"
+        self.dialog._preparing_task = old
+        self.dialog._prepare_busy = True
+        self.dialog._prepare = Mock()
+        old["item"].setSelected(True)
+        self.dialog.cancel_selected_tasks()
+        self.dialog._prepare.cancel.assert_called_once()
+        new = self.task(4)
+        new["state"] = "读取章节中"
+        self.dialog._on_prepared({"event": "prepared", "album_id": "123", "meta": metadata(4)})
+        self.assertEqual("已取消", old["state"])
+        self.assertEqual("读取章节中", new["state"])
+
+    def test_edit_restores_selection_and_updates_range_without_auto_start(self):
+        task = self.task(12)
+        self.dialog._apply_selection(task, ["101", "102"])
+        task["item"].setSelected(True)
+        old_key = task["ingest_meta"]["selection_key"]
+        def execute(d):
+            self.assertEqual(["101", "102"], d.selected_ids())
+            self.assertEqual("修改章节中", task["state"])
+            d.range_edit.setText("3-5")
+            d.apply_range()
+            return QDialog.DialogCode.Accepted
+        with patch.object(ChapterDialog, "exec", execute):
+            self.dialog.edit_selected_task()
+        self.assertEqual("等待中", task["state"])
+        self.assertEqual(["103", "104", "105"], task["selected"])
+        self.assertEqual("第 3-5 集", task["label"])
+        self.assertNotEqual(old_key, task["ingest_meta"]["selection_key"])
+
+    def test_dismiss_edit_keeps_old_chapters_and_active_cannot_edit(self):
+        task = self.task(8)
+        self.dialog._apply_selection(task, ["101"])
+        task["item"].setSelected(True)
+        with patch.object(ChapterDialog, "exec", return_value=QDialog.DialogCode.Rejected):
+            self.dialog.edit_selected_task()
+        self.assertEqual(["101"], task["selected"])
+        self.assertEqual("等待中", task["state"])
+        task["state"] = "下载中"
+        self.dialog._render_task(task)
+        self.assertFalse(self.dialog.edit_task_button.isEnabled())
+        with patch.object(ChapterDialog, "exec") as execute:
+            self.dialog.edit_selected_task()
+            execute.assert_not_called()
+
+    def test_cancel_multiple_selected_tasks(self):
+        for _ in range(3):
+            t = self.task(4)
+            t["state"] = "等待中"
+            t["item"].setSelected(True)
+        self.dialog.cancel_selected_tasks()
+        self.assertEqual(["已取消"] * 3, [t["state"] for t in self.dialog._tasks])
+
+    def test_progress_stays_busy_until_selected_total_is_known(self):
+        self.dialog.on_worker_event({"event": "meta", "total_images": 0})
+        self.dialog.on_worker_event({"event": "pages_known", "known_pages": 20,
+                                    "chapters_ready": 1, "chapters_total": 2, "total": 0})
+        self.assertEqual(0, self.dialog.progress_bar.maximum())
+        self.dialog.on_worker_event({"event": "pages_known", "known_pages": 50,
+                                    "chapters_ready": 2, "chapters_total": 2, "total": 50})
+        self.dialog.on_worker_event({"event": "progress", "images": 25, "total": 50, "percent": 50})
+        self.assertEqual(100, self.dialog.progress_bar.maximum())
+        self.assertEqual(50, self.dialog.progress_bar.value())
+
 
 class WorkerTests(unittest.TestCase):
     def test_cancel_removes_partial_folder_without_downloaded_event(self):

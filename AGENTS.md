@@ -7,14 +7,16 @@
 把上游 CLI 工具（jmcomic-calibre，`jmcal` 命令）改造为 **Calibre GUI 插件**：
 输入禁漫漫画 ID → 自动下载 → 打包 CBZ（内嵌 ComicInfo.xml）→ 带元数据直接入库 Calibre。
 
-**当前状态：基于 v0.2.8（762855b）开发的 v0.3.0 本地候选版，待用户真实站点 / Calibre GUI 验收；v0.2.7 阶段 1-4 已验收。**
-- 2026-10-31：日志中漫画 364522 有 314 张图片 SSL 中断/超时后失败。bridge 固定章节并发 1、图片并发 4，避免上游默认 30 × CPU 核心数放大连接；仍需用户真实站点验证，不能认定站点限流或网络问题已解决。
-- 新构建：`dist/jmdownload-calibre-v0.3.0.zip`；保留 v0.2.8 并发限制，不覆盖旧版本 zip。
-- 测试：`python -m unittest tests.test_plugin`，53 项；真实 Qt 离线冒烟 `calibre-debug -e tests/gui_smoke.py`，13 项。后者启动前应将 `CALIBRE_CONFIG_DIRECTORY` 指向工作区 `.qa-calibre`，隔离用户配置。
+**当前状态：v0.3.1 本地候选版，基于 v0.3.0（b1c3e7a）优化；v0.2.8（762855b）为前置并发修复。待用户真实站点 / Calibre GUI 验收；v0.2.7 阶段 1-4 已验收。**
+- 历史：v0.2.8 将章节 / 图片并发限制为 1 / 4，降低大合集连接数；v0.3.1 按用户明确要求提高到 1 / 16，不能认定站点限流或网络问题已解决。
+- 新构建：`dist/jmdownload-calibre-v0.3.1.zip`；保留旧版本 zip。
+- 测试：`python -m unittest tests.test_plugin`，57 项；真实 Qt 离线冒烟 `calibre-debug -e tests/gui_smoke.py`，19 项。后者启动前应将 `CALIBRE_CONFIG_DIRECTORY` 指向工作区 `.qa-calibre`，隔离用户配置。
 - 2026-10-31：新增可配置自动下载集数门槛（默认 3，0 为始终选择）、章节勾选 / 范围批量选择、下载中追加 ID、队列封面缩略图。离线测试与离屏布局检查通过，真实下载与内容 QC 未执行。
-- 旧发布交接简报：`reports/release/release-v0.2.7_review_brief.md`，只适用于 v0.2.7；v0.3.0 未发布。
+- 2026-10-31：用户日志确认 v0.3.0 选集下载前串行统计 10 章耗时 131 秒，存在重复漫画 / 章节查询。v0.3.1 预读以 JSON 快照传漫画详情，下载复用 option.build_jm_client 的连接；逐章 get_photo_detail(fetch_album=False) 后直接下载该详情，禁止重新按 ID 下载，保留失败检查。选集总页数未知时显示张数，最后一章详情就绪后切换精确百分比。离线验证顺序和请求次数，不宣称实际网络提速比例。
+- v0.3.1 队列管理：可取消任意待读取 / 读取中 / 待选择 / 等待 / 下载中的任务，支持多选取消；仅等待中的任务可修改章节（恢复原勾选，取消编辑保留原选择）。编辑期间状态为“修改章节中”，阻止自动开始该任务；取消预读后丢弃迟到结果，防止复活任务或误更新同 ID 的新任务。
+- 旧发布交接简报：`reports/release/release-v0.2.7_review_brief.md`，只适用于 v0.2.7；新候选版未发布。
 
-## 功能清单（v0.3.0 候选版）
+## 功能清单（v0.3.1 候选版）
 
 - 批量输入漫画 ID/网页链接（自动提取 ID、去重、注释行支持）
 - 子进程桥调用系统 Python 的 jmcomic 下载（防黑框、可取消、取消清理半成品）
@@ -22,7 +24,7 @@
 - 元数据随书入库（标题/作者/标签/简介/日期/封面，legacy add_books 路径，视图即时刷新）
 - 双标识符：`jmcomic:<id>` 判重 + `url:` 可点击跳转（域名可配置）
 - 判重跳过（identifiers 精确搜索）
-- 精确进度条（page_count 百分比，n/total 显示；无总页数时回退 busy）
+- 精确进度条（全本 page_count 百分比；选集逐章统计，全部选集页数确定前显示已下载张数，确定后显示 n/total 与百分比）
 - 工具栏分体按钮 + 下拉菜单（下载/配置/环境检测）
 - 配置面板（解释器/域名/代理/临时目录/判重开关/保留开关 + 环境测试按钮）
 - 会话日志一键复制（状态变化全记录 + 失败堆栈 + jmcomic 日志尾部，环境头信息）
@@ -32,6 +34,8 @@
 - 按章节顺序逐集下载，输出唯一章节 / 页码文件名，避免多集图片交错或 CBZ 重名；每次任务使用独立临时目录，防止混入旧任务图片。封面预览独立保存，不进入 CBZ。
 
 ## 冻结的架构决策与踩坑清单（勿推翻；新代码必须遵守）
+
+- **2026-10-31 用户明确调整并发**：章节仍为 1，图片上限从 4 提高至 16；复用漫画和章节详情，取消下载前遍历所有选集统计页数，后续章节页数随下载逐步读取。
 
 - **下载引擎**：子进程桥调用系统 Python 的 jmcomic（curl-cffi/pycryptodome 为二进制依赖，无法进插件 zip）。
 - **bridge 必须 sys.path 隔离**：jmcomic 内部有裸导入 `from common import ...`，
@@ -71,7 +75,7 @@
 
 - 代理：代码、离线单测（不碰网络）、构建 zip、git 提交
 - 用户：真实站点联调、Calibre GUI 验收、内容 QC、GitHub push/Release（需用户凭证）
-- 测试：`python -m unittest tests.test_plugin`（53 项，全离线）；`tests/gui_smoke.py` 另有 13 项真实 Qt 离线测试，不连接站点 / 书库。
+- 测试：`python -m unittest tests.test_plugin`（57 项，全离线）；`tests/gui_smoke.py` 另有 19 项真实 Qt 离线测试，不连接站点 / 书库。
 
 ## 阶段计划与进度
 
@@ -85,7 +89,7 @@
    - 打 tag `v0.2.7` 并推送
    - 创建 GitHub Release：标题 `v0.2.7`，上传 `dist/jmdownload-calibre-v0.2.7.zip`，
      说明文案见交接简报第三节
-   - README 已包含插件安装 / 使用说明；v0.3.0 安装包待 GUI 与真实站点验收后再制定对应 Release
+   - README 已包含插件安装 / 使用说明；v0.3.1 安装包待 GUI 与真实站点验收后再制定对应 Release
 
 ## 协作约定
 

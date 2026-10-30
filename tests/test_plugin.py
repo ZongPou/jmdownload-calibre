@@ -54,6 +54,38 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class TestDownloadConcurrency(unittest.TestCase):
+    def test_real_downloader_reuses_preloaded_details_offline(self):
+        import jmcomic
+        import json
+        import contextlib
+        import io
+        from calibre_plugin.bridge import album_snapshot, fetch_meta_and_download
+        album = jmcomic.JmAlbumDetail("123", "0", "测试", [("900", "1", "一"), ("300", "2", "二")],
+            4, "", "", "0", "0", 0, [], [], [], [])
+        option = jmcomic.JmOption.default()
+        photo_calls = []
+        def get_photo(photo_id, **kwargs):
+            photo_calls.append((photo_id, kwargs))
+            return jmcomic.JmPhotoDetail(photo_id, "章节", "123", "1" if photo_id == "900" else "2",
+                scramble_id="0", page_arr=["00001.webp", "00002.webp"], data_original_domain="offline.invalid")
+        client = types.SimpleNamespace(get_photo_detail=get_photo, get_album_detail=Mock(side_effect=AssertionError("不应请求漫画详情")))
+        client.check_photo = lambda photo: jmcomic.JmApiClient.check_photo(client, photo)
+        option.build_jm_client = Mock(return_value=client)
+        def image_download(downloader, image):
+            path = Path(downloader.option.decide_image_filepath(image))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"offline image")
+            image.save_path = str(path)
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            cache = Path(tmp) / "album.json"
+            cache.write_text(json.dumps(album_snapshot(album)), encoding="utf-8")
+            with patch.object(jmcomic.JmOption, "default", return_value=option), patch.object(
+                jmcomic.JmDownloader, "download_by_image_detail", image_download), patch("calibre_plugin.bridge.emit") as emit:
+                fetch_meta_and_download("123", tmp, "", chapter_ids=["900", "300"], album_cache=str(cache))
+            self.assertEqual(4, len(collect_images(tmp)))
+            self.assertEqual([("900", {"fetch_album": False}), ("300", {"fetch_album": False})], photo_calls)
+            self.assertEqual(4, emit.call_args_list[-1].args[0]["images"])
+
     def test_large_album_is_bounded_and_failure_never_reports_downloaded(self):
         from calibre_plugin.bridge import fetch_meta_and_download
 
@@ -61,7 +93,7 @@ class TestDownloadConcurrency(unittest.TestCase):
             dir_rule=types.SimpleNamespace(base_dir=""),
             download=types.SimpleNamespace(threading=types.SimpleNamespace(
                 photo=32, image=30)),
-            new_jm_client=Mock(return_value=types.SimpleNamespace(
+            build_jm_client=Mock(return_value=types.SimpleNamespace(
                 get_album_detail=Mock(return_value=types.SimpleNamespace(
                     page_count=5000)))),
         )
@@ -69,7 +101,7 @@ class TestDownloadConcurrency(unittest.TestCase):
         def download(album_id, actual_option):
             self.assertEqual("364522", album_id)
             self.assertEqual(1, actual_option.download.threading.photo)
-            self.assertEqual(4, actual_option.download.threading.image)
+            self.assertEqual(16, actual_option.download.threading.image)
             raise RuntimeError("部分下载失败")
 
         fake = types.SimpleNamespace(
@@ -150,21 +182,31 @@ class TestChapterSelection(unittest.TestCase):
     def _fake_jm(self):
         album = types.SimpleNamespace(name="多集漫画", page_count=6,
             episode_list=[("900", "1", "一"), ("100", "2", "二"), ("300", "3", "三")])
+        class Photo:
+            def __init__(self, photo_id):
+                self.photo_id = photo_id
+            def __len__(self):
+                return 2
         client = types.SimpleNamespace(get_album_detail=Mock(return_value=album),
-            get_photo_detail=Mock(return_value=[1, 2]), download_album_cover=Mock())
+            get_photo_detail=Mock(side_effect=lambda photo_id, **kwargs: Photo(photo_id)), download_album_cover=Mock())
         option = types.SimpleNamespace(dir_rule=types.SimpleNamespace(base_dir=""),
             download=types.SimpleNamespace(threading=types.SimpleNamespace(photo=30, image=30)),
-            new_jm_client=lambda: client)
+            build_jm_client=lambda: client)
         fake = types.SimpleNamespace(JmOption=types.SimpleNamespace(default=lambda: option),
                                      download_album=Mock())
-        def download_photo(photo_id, opt):
-            self.assertEqual(1, opt.download.threading.photo)
-            self.assertEqual(4, opt.download.threading.image)
-            folder = Path(opt.dir_rule.base_dir) / photo_id
+        def download_photo(photo):
+            photo_id = photo.photo_id
+            self.assertEqual(1, option.download.threading.photo)
+            self.assertEqual(16, option.download.threading.image)
+            self.assertIsNotNone(photo.from_album)
+            folder = Path(option.dir_rule.base_dir) / photo_id
             folder.mkdir()
             (folder / "1.jpg").write_bytes(photo_id.encode())
             (folder / "2.jpg").write_bytes(photo_id.encode())
-        fake.download_photo = Mock(side_effect=download_photo)
+        fake.download_photo = Mock()
+        fake.downloader = types.SimpleNamespace(download_by_photo_detail=Mock(side_effect=download_photo),
+            raise_if_has_exception=Mock(), begin_manifest=Mock(), finish_manifest=Mock())
+        fake.JmDownloader = Mock(return_value=fake.downloader)
         return fake, client
 
     def test_selected_only_in_episode_order_unique_page_names_and_progress(self):
@@ -172,12 +214,14 @@ class TestChapterSelection(unittest.TestCase):
         fake, _ = self._fake_jm()
         with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit") as emit:
             fetch_meta_and_download("123", tmp, "", chapter_ids=["300", "900"])
-            self.assertEqual(["900", "300"], [c.args[0] for c in fake.download_photo.call_args_list])
+            self.assertEqual(["900", "300"], [c.args[0].photo_id for c in fake.downloader.download_by_photo_detail.call_args_list])
             fake.download_album.assert_not_called()
             images = collect_images(tmp)
             self.assertEqual([b"900", b"900", b"300", b"300"], [Path(p).read_bytes() for p in images])
             events = [c.args[0] for c in emit.call_args_list]
-            self.assertEqual(4, next(e for e in events if e["event"] == "meta")["total_images"])
+            self.assertEqual(0, next(e for e in events if e["event"] == "meta")["total_images"])
+            page_events = [e for e in events if e["event"] == "pages_known"]
+            self.assertEqual([0, 4], [e["total"] for e in page_events])
             self.assertEqual(4, next(e for e in events if e["event"] == "downloaded")["images"])
             archive = Path(tmp) / "test.cbz"
             pack_cbz(images, "<ComicInfo/>", str(archive))
@@ -189,7 +233,7 @@ class TestChapterSelection(unittest.TestCase):
         fake, _ = self._fake_jm()
         with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit") as emit:
             fetch_meta_and_download("123", tmp, "", chapter_ids=["900", "100", "300"])
-            self.assertEqual(3, fake.download_photo.call_count)
+            self.assertEqual(3, fake.downloader.download_by_photo_detail.call_count)
             self.assertEqual(6, emit.call_args_list[0].args[0]["total_images"])
 
     def test_changed_chapters_fail_before_download(self):
@@ -209,6 +253,52 @@ class TestChapterSelection(unittest.TestCase):
             self.assertEqual(3, emit.call_args_list[0].args[0]["chapters"].__len__())
             fake.download_photo.assert_not_called()
             fake.download_album.assert_not_called()
+
+    def test_first_chapter_downloads_before_second_detail_is_requested(self):
+        from calibre_plugin.bridge import fetch_meta_and_download
+        fake, client = self._fake_jm()
+        order = []
+        get_photo = client.get_photo_detail.side_effect
+        download = fake.downloader.download_by_photo_detail.side_effect
+        def get(photo_id, **kwargs):
+            self.assertEqual({"fetch_album": False}, kwargs)
+            order.append("get:" + photo_id)
+            return get_photo(photo_id)
+        def save(photo):
+            order.append("download:" + photo.photo_id)
+            download(photo)
+        client.get_photo_detail.side_effect = get
+        fake.downloader.download_by_photo_detail.side_effect = save
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit"):
+            fetch_meta_and_download("123", tmp, "", chapter_ids=["900", "300"])
+        self.assertEqual(["get:900", "download:900", "get:300", "download:300"], order)
+        client.get_album_detail.assert_called_once_with("123")
+        fake.JmDownloader.assert_called_once()
+
+    def test_reuses_preview_album_without_album_request(self):
+        import json
+        from calibre_plugin.bridge import fetch_meta_and_download, ALBUM_FIELDS
+        fake, client = self._fake_jm()
+        fields = {name: "" for name in ALBUM_FIELDS}
+        fields.update(album_id="123", name="缓存漫画", page_count=6,
+                      episode_list=[("900", "1", "一"), ("100", "2", "二"), ("300", "3", "三")])
+        fake.JmAlbumDetail = lambda **kwargs: types.SimpleNamespace(**kwargs)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit"):
+            cache = Path(tmp) / "album.json"
+            cache.write_text(json.dumps(fields), encoding="utf-8")
+            fetch_meta_and_download("123", tmp, "", chapter_ids=["900"], album_cache=str(cache))
+        client.get_album_detail.assert_not_called()
+        self.assertEqual("缓存漫画", fake.downloader.download_by_photo_detail.call_args.args[0].from_album.name)
+
+    def test_detail_download_failure_never_reports_success(self):
+        from calibre_plugin.bridge import fetch_meta_and_download
+        fake, _ = self._fake_jm()
+        fake.downloader.raise_if_has_exception.side_effect = RuntimeError("图片失败")
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, {"jmcomic": fake}), patch("calibre_plugin.bridge.emit") as emit:
+            with self.assertRaisesRegex(RuntimeError, "图片失败"):
+                fetch_meta_and_download("123", tmp, "", chapter_ids=["900", "300"])
+            self.assertFalse(any(c.args[0]["event"] == "downloaded" for c in emit.call_args_list))
+            fake.downloader.finish_manifest.assert_called_once()
 
 
 class TestPythonCandidates(unittest.TestCase):
@@ -340,7 +430,7 @@ class TestConfigDefaults(unittest.TestCase):
 
 class TestBuildPlugin(unittest.TestCase):
     def test_read_version(self):
-        self.assertEqual("0.3.0", read_version())
+        self.assertEqual("0.3.1", read_version())
 
     def test_collect_files_excludes_cache(self):
         names = {f.name for f in collect_files()}
