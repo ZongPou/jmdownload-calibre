@@ -7,7 +7,9 @@
 把上游 CLI 工具（jmcomic-calibre，`jmcal` 命令）改造为 **Calibre GUI 插件**：
 输入禁漫漫画 ID → 自动下载 → 打包 CBZ（内嵌 ComicInfo.xml）→ 带元数据直接入库 Calibre。
 
-**当前状态：v0.3.4 发布准备；已按用户确认从 v0.3.5 恢复源码和对应测试，保留审核后的 README 与新截图，授权推送并发布 v0.3.4。**
+**当前状态：v0.3.4 已于 2026-10-31 推送并正式发布。按用户确认从 v0.3.5 恢复源码和对应测试，保留审核后的 README 与新截图。**
+- Release：https://github.com/ZongPou/jmdownload-calibre/releases/tag/v0.3.4 。标签 `v0.3.4` 指向 `f05193f1938f071b86a1ef34723cb6669d38466f`，已推送至 origin；插件内容与原 v0.3.4（f7e5a22）一致。
+- 发布附件 `jmdownload-calibre-v0.3.4.zip`：1,525,726 字节，SHA256 `37b35dfe08f13a184837bd4e220e911f105bc0808d8c44552c912f64240e7926`；GitHub 返回的大小与 digest 已和本地核对一致，状态 uploaded，非草稿、非预发布。
 - 历史：v0.2.8 将章节 / 图片并发限制为 1 / 4，降低大合集连接数；v0.3.1 按用户明确要求提高到 1 / 16，不能认定站点限流或网络问题已解决。
 - 新构建：`dist/jmdownload-calibre-v0.3.4.zip`；保留旧版本 zip。
 - 测试：`python -m unittest tests.test_plugin`，59 项；真实 Qt 离线冒烟 `calibre-debug -e tests/gui_smoke.py`，27 项。后者启动前应将 `CALIBRE_CONFIG_DIRECTORY` 指向工作区 `.qa-calibre`，隔离用户配置。
@@ -17,7 +19,7 @@
 - 2026-10-31：新增可配置自动下载集数门槛（默认 3，0 为始终选择）、章节勾选 / 范围批量选择、下载中追加 ID、队列封面缩略图。离线测试与离屏布局检查通过，真实下载与内容 QC 未执行。
 - 2026-10-31：用户日志确认 v0.3.0 选集下载前串行统计 10 章耗时 131 秒，存在重复漫画 / 章节查询。v0.3.1 预读以 JSON 快照传漫画详情，下载复用 option.build_jm_client 的连接；逐章 get_photo_detail(fetch_album=False) 后直接下载该详情，禁止重新按 ID 下载，保留失败检查。选集总页数未知时显示张数，最后一章详情就绪后切换精确百分比。离线验证顺序和请求次数，不宣称实际网络提速比例。
 - v0.3.1 队列管理基础：仅等待中的任务可修改章节（恢复原勾选，取消编辑保留原选择）。编辑期间状态为“修改章节中”，阻止自动开始该任务；取消预读后丢弃迟到结果，防止复活任务或误更新同 ID 的新任务。v0.3.3 用行内修改 / 移除替代所选任务按钮与多选取消。
-- 旧发布交接简报：`reports/release/release-v0.2.7_review_brief.md`，只适用于 v0.2.7；当前 v0.3.4 Release 待实际发布并验证。
+- 旧发布交接简报：`reports/release/release-v0.2.7_review_brief.md`，只适用于 v0.2.7；v0.3.4 已按本文件记录发布并验证。
 
 ## 功能清单（v0.3.4 候选版）
 
@@ -69,7 +71,7 @@
 - Calibre 9.15（内嵌 Python 3.14；JSONConfig 无 defaults 参数，用 setdefault 注入默认值）
 - 系统 Python 3.13.13 @ `C:\Program Files\Python313\python.exe`；jmcomic 2.7.8（--user 安装）
 - 公开仓库目标：`ZongPou/jmdownload-calibre`；内部插件包名保持 `jmcomic2calibre`
-- git remote：当前工作区仍指向旧远程，待用户在 GitHub 完成仓库改名后再更新 remote
+- git remote：origin 已为 `https://github.com/ZongPou/jmdownload-calibre.git`；upstream 保持原上游。
 - 本地仓库根 = 工作区根 `c:/Users/zongp/Documents/ChatGPT/jmcomic2calibre`
 - 诊断脚本：`scripts/diag_meta.py`（查元数据定位网络问题）、`scripts/diag_fields.py`（字段探测）、
   bridge.py `--meta-only`
@@ -77,7 +79,7 @@
 ## 分工边界（重要）
 
 - 代理：代码、离线单测（不碰网络）、构建 zip、git 提交
-- 用户：真实站点联调、Calibre GUI 验收、内容 QC、GitHub push/Release（需用户凭证）
+- 用户：真实站点联调、Calibre GUI 验收、内容 QC；GitHub push/Release 由用户执行，或明确授权代理使用正常登录流程执行（v0.3.4 已授权并完成）。
 - 测试：`python -m unittest tests.test_plugin`（59 项，全离线）；`tests/gui_smoke.py` 另有 27 项真实 Qt 离线测试，不连接站点 / 书库。
 
 ## 阶段计划与进度
@@ -87,12 +89,10 @@
 3. [x] 入库（CBZ+ComicInfo.xml+legacy add_books/判重/双标识符/封面/视图即时刷新）
 4. [x] 打磨（4A 配置面板 / 4B 精确进度条 / 4C 下拉菜单 / 4D 日志一键复制 /
        取消闪退修复 / 中途取消清理半成品 / 防黑框全覆盖）
-5. [ ] **发布（进行中，交接简报见 reports/release/）**：
-   - 用户验收候选版后 push 本地未推送提交到 origin/main（需用户凭证）
-   - 打 tag `v0.2.7` 并推送
-   - 创建 GitHub Release：标题 `v0.2.7`，上传 `dist/jmdownload-calibre-v0.2.7.zip`，
-     说明文案见交接简报第三节
-   - README 已包含插件安装 / 使用说明；v0.3.4 安装包待 GUI 与真实站点验收后再制定对应 Release
+5. [x] **v0.3.4 发布完成**：
+   - 已推送 main、`v0.3.4` 标签。
+   - 已创建正式 GitHub Release，标题 `v0.3.4`，上传并校验安装包。
+   - README 使用用户审核后的说明及两张新截图。
 
 ## 协作约定
 
