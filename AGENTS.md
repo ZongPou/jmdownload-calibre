@@ -4,6 +4,8 @@
 
 ## 项目目标与当前状态
 
+- 2026-10-31 文档审核：用户表示已回退使用 v0.3.4，要求 README 按 v0.3.4 更新后先审核、不推送远程。检查时工作区源码仍为 v0.3.5（af7a936）；本轮仅按 f7e5a22 的功能更新 README，不回退代码、不发布。README 的版本说明与当前源码版本暂时不同。
+
 把上游 CLI 工具（jmcomic-calibre，`jmcal` 命令）改造为 **Calibre GUI 插件**：
 输入禁漫漫画 ID → 自动下载 → 打包 CBZ（内嵌 ComicInfo.xml）→ 带元数据直接入库 Calibre。
 
