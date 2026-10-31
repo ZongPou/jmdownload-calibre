@@ -56,9 +56,14 @@ Calibre GUI 插件：输入漫画 ID 或网页链接，选择章节，下载并�
 
 ## 界面截图
 
-![JMdownload 下载窗口](docs/screenshots/jmdownload-window.png)
+下载窗口：支持输入多个漫画 ID 或链接，下载中可继续添加任务。
 
-截图为早期版本界面。v0.3.4 的任务行右侧提供 **修改 / ×**，弹窗底部为 **复制日志 / 添加并下载 / 关闭**；配置和环境检测位于工具栏下拉菜单。
+![JMdownload 下载窗口](docs/screenshots/jmdownload-window-v0.3.4.png)
+
+章节选择：支持逐集勾选、全选、清空，以及输入 `1-10` 等范围批量选择。
+
+![JMdownload 章节选择窗口](docs/screenshots/jmdownload-chapters-v0.3.4.png)
+
 
 ## 环境要求
 
