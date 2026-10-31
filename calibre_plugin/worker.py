@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import traceback
 import tempfile
+import base64
 
 from qt.core import QThread, pyqtSignal
 
@@ -245,7 +246,7 @@ class DownloadWorker(QThread):
 
 
 class PrepareWorker(DownloadWorker):
-    """只预读漫画详情与章节列表，不发起封面请求。"""
+    """仅预读章节；封面由 CoverWorker 独立加载。"""
 
     def run(self):
         bridge_path = None
@@ -296,6 +297,63 @@ class PrepareWorker(DownloadWorker):
                 self.message_received.emit({"event": "prepare_error", "album_id": album_id,
                                             "message": str(exc)})
         finally:
+            if bridge_path:
+                try:
+                    os.unlink(bridge_path)
+                except OSError:
+                    pass
+
+
+class CoverWorker(DownloadWorker):
+    """封面独立进程：不获取漫画详情，失败不影响章节与下载。"""
+
+    def run(self):
+        bridge_path = None
+        album_id = self.album_ids[0]
+        try:
+            bridge_path = self._extract_bridge()
+            with tempfile.TemporaryDirectory(prefix="jm_cover_") as tmp:
+                cover_path = os.path.join(tmp, "cover.jpg")
+                cmd = self.python_cmd + [bridge_path, "--album-id", album_id,
+                    "--out-dir", tmp, "--cover-only", "--cover-path", cover_path]
+                if prefs["proxy"]:
+                    cmd += ["--proxy", prefs["proxy"]]
+                self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                    errors="replace", creationflags=_CREATE_NO_WINDOW)
+                if self._cancelled:
+                    self._proc.terminate()
+                try:
+                    output, _ = self._proc.communicate(timeout=60)
+                finally:
+                    # 先结束占用封面文件的进程，再让 TemporaryDirectory 清理。
+                    if self._proc.poll() is None:
+                        self._proc.kill()
+                        self._proc.communicate()
+                error, ready = None, False
+                for line in output.splitlines():
+                    ev = parse_event_line(line)
+                    if not ev:
+                        continue
+                    if ev["event"] == "cover":
+                        ready = True
+                    elif ev["event"] == "error":
+                        error = ev.get("message", "封面获取失败")
+                if self._cancelled:
+                    return
+                if error or self._proc.returncode or not ready:
+                    raise RuntimeError(error or "未返回封面")
+                with open(cover_path, "rb") as handle:
+                    data = base64.b64encode(handle.read()).decode("ascii")
+                self.message_received.emit({"event": "cover_ready", "album_id": album_id, "cover": data})
+        except Exception as exc:
+            if self._proc is not None and self._proc.poll() is None:
+                self._proc.kill()
+                self._proc.communicate()
+            if not self._cancelled:
+                self.message_received.emit({"event": "cover_error", "album_id": album_id, "message": str(exc)})
+        finally:
+            self._proc = None
             if bridge_path:
                 try:
                     os.unlink(bridge_path)
